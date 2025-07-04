@@ -1,72 +1,116 @@
+import logging
+import sys
 import os
+
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
 from llama_index.llms.ollama import Ollama
 from llama_index.embeddings.ollama import OllamaEmbedding
+from llama_index.core.prompts import PromptTemplate
 
-# Set global LlamaIndex settings to use Ollama
-Settings.llm = Ollama(model="mistral:latest", request_timeout=120.0)
-Settings.embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+# Configure logging to show info messages for your script, but suppress others
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
-# --- Configuration ---
-# DATA_DIRECTORY will contain data.txt, Kaia-Character-Profile.md, and Kaia_Desktop_Persona.md
-# We will primarily use kaia_desktop_persona.md for the system prompt.
-DATA_DIRECTORY = "./data" # Directory containing your documents
+# --- Suppress verbose logging from httpx and httpcore ---
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+# --------------------------------------------------------
 
-# Create the data directory if it doesn't exist
-os.makedirs(DATA_DIRECTORY, exist_ok=True)
+# --- Ollama Model Configuration ---
+# You can change these to other models available via Ollama (e.g., "llama3", "mixtral", "gemma")
+LLM_MODEL = "mistral"
+EMBEDDING_MODEL = "nomic-embed-text" # Used for generating embeddings for your documents and queries
 
-print(f"Loading documents from {DATA_DIRECTORY}...")
-documents = SimpleDirectoryReader(DATA_DIRECTORY).load_data()
-print(f"Loaded {len(documents)} document(s).")
+# --- Directory Paths ---
+# Directory for general Linux knowledge base
+GENERAL_KNOWLEDGE_DIR = "./data"
+# Directory for personal context files (add this to your .gitignore!)
+PERSONAL_CONTEXT_DIR = "./personal_context"
+# Directory where your persona definition is (now correctly pointing to ./data)
+PERSONA_DIR = "./data"
 
-# Separate Kaia's persona document from the general knowledge documents
-kaia_persona_doc_content = ""
-general_knowledge_docs = []
+# --- Initialize Ollama LLM and Embedding Model ---
+Settings.llm = Ollama(model=LLM_MODEL, request_timeout=360.0)
+Settings.embed_model = OllamaEmbedding(model_name=EMBEDDING_MODEL)
 
-for doc in documents:
-    if "kaia_desktop_persona.md" in doc.metadata.get('file_name', '').lower():
-        kaia_persona_doc_content = doc.text
+print(f"Loading documents from {GENERAL_KNOWLEDGE_DIR} and {PERSONAL_CONTEXT_DIR}...")
+
+# --- Load Documents ---
+# Load general Linux knowledge base documents
+general_docs = SimpleDirectoryReader(GENERAL_KNOWLEDGE_DIR).load_data()
+# Filter out the persona document from the general docs if it's meant to be loaded separately
+general_docs = [doc for doc in general_docs if "Kaia_Desktop_Persona.md" not in doc.id_]
+print(f"Loaded {len(general_docs)} general document(s) from {GENERAL_KNOWLEDGE_DIR}.")
+
+# Load personal context documents
+personal_docs = SimpleDirectoryReader(PERSONAL_CONTEXT_DIR).load_data()
+print(f"Loaded {len(personal_docs)} personal document(s) from {PERSONAL_CONTEXT_DIR}.")
+
+# Combine all documents for the main index
+all_documents = general_docs + personal_docs
+print(f"Total {len(all_documents)} document(s) loaded for indexing.")
+
+# Load Persona document directly by specifying its file path
+kaia_persona_content = ""
+try:
+    persona_doc_path = os.path.join(PERSONA_DIR, "Kaia_Desktop_Persona.md")
+    persona_docs_list = SimpleDirectoryReader(input_files=[persona_doc_path]).load_data()
+    kaia_persona_content = persona_docs_list[0].text if persona_docs_list else ""
+    if kaia_persona_content:
         print("Found Kaia's desktop persona profile.")
     else:
-        general_knowledge_docs.append(doc)
+        print("Warning: Kaia's persona document found but empty.")
+except Exception as e:
+    kaia_persona_content = ""
+    print(f"Error loading Kaia's persona document from {persona_doc_path}: {e}. Ensure the file exists and is readable.")
 
-if not kaia_persona_doc_content:
-    print("Warning: 'kaia_desktop_persona.md' not found in data directory. Persona may not be applied.")
+if not kaia_persona_content:
+    print("CRITICAL WARNING: Kaia's persona content is missing. Responses may be generic.")
 
-print("Creating index from general knowledge documents (this might take a moment)...")
-# Index only the general knowledge documents
-index = VectorStoreIndex.from_documents(general_knowledge_docs)
+
+# --- Create Index ---
+print("Creating index from all loaded documents (this might take a moment)...")
+index = VectorStoreIndex.from_documents(all_documents)
 print("Index created.")
 
-# Create a query engine, now with Kaia's persona as the system prompt
-# We use the content of the kaia_desktop_persona.md as the system prompt
-query_engine = index.as_query_engine(system_prompt=kaia_persona_doc_content) # <-- Use content of persona doc here!
+# --- Configure Query Engine with Persona ---
+query_engine = index.as_query_engine(
+    similarity_top_k=3 # You can adjust this value to retrieve more or fewer relevant chunks
+)
 
-# Query the index with your LLM
+# Custom prompt template to inject the persona
+# Ensure the persona instructions are concise and directly impact response style.
+# The `context_str` will contain the retrieved knowledge.
+template = (
+    "You are an AI assistant named Kaia. Your persona is defined by the following guidelines:\n"
+    "Persona Guidelines:\n"
+    "------\n"
+    f"{kaia_persona_content}\n"
+    "------\n"
+    "Given the context information and the persona guidelines, answer the query.\n"
+    "Context Information is below.\n"
+    "---------------------\n"
+    "{context_str}\n"
+    "---------------------\n"
+    "Query: {query_str}\n"
+    "Kaia's Response: "
+)
+qa_template = PromptTemplate(template)
+query_engine.update_prompts({"response_synthesizer:text_qa_template": qa_template})
+
+
 print("\nQuerying the index...")
 
-# ... (Keep all your existing queries here as they are) ...
-query1 = "What is the highest mountain?"
-response1 = query_engine.query(query1)
-print(f"\nQuery: {query1}")
-print(f"Kaia's Response: {response1}")
+# --- Interactive Query Loop ---
+while True:
+    try:
+        query = input("Query (type 'exit' to quit): ")
+        if query.lower() == 'exit':
+            break
 
-query2 = "What year is it according to the document?"
-response2 = query_engine.query(query2)
-print(f"\nQuery: {query2}")
-print(f"Kaia's Response: {response2}")
-
-query3 = "What is your view on short-term market speculation?"
-response3 = query_engine.query(query3)
-print(f"\nQuery: {query3}")
-print(f"Kaia's Response: {response3}")
-
-query4 = "Tell me about your thoughts on emerging AI technologies."
-response4 = query_engine.query(query4)
-print(f"\nQuery: {query4}")
-print(f"Kaia's Response: {response4}")
-
-query5 = "I'm thinking of putting all my savings into a new highly volatile crypto coin."
-response5 = query_engine.query(query5)
-print(f"\nQuery: {query5}")
-print(f"Kaia's Response: {response5}")
+        response = query_engine.query(query)
+        print(f"Kaia's Response: {response}\n")
+    except Exception as e:
+        print(f"An error occurred during query processing: {e}")
+        # Optionally, you can add more specific error handling or just break
+        break
