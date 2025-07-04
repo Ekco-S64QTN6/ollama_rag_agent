@@ -24,9 +24,9 @@ EMBEDDING_MODEL = "nomic-embed-text" # Used for generating embeddings for your d
 # --- Directory Paths ---
 # Directory for general Linux knowledge base
 GENERAL_KNOWLEDGE_DIR = "./data"
-# Directory for personal context files (add this to your .gitignore!)
+# Directory for personal context files
 PERSONAL_CONTEXT_DIR = "./personal_context"
-# Directory where your persona definition is (now correctly pointing to ./data)
+# Directory where your persona definition is
 PERSONA_DIR = "./data"
 
 # --- Initialize Ollama LLM and Embedding Model ---
@@ -93,7 +93,6 @@ template = (
     "{context_str}\n"
     "---------------------\n"
     "Query: {query_str}\n"
-    "Kaia's Response: "
 )
 qa_template = PromptTemplate(template)
 query_engine.update_prompts({"response_synthesizer:text_qa_template": qa_template})
