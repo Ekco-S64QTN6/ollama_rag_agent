@@ -1,6 +1,7 @@
 import logging
 import sys
 import os
+import subprocess
 
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
 from llama_index.llms.ollama import Ollama
@@ -97,6 +98,43 @@ template = (
 qa_template = PromptTemplate(template)
 query_engine.update_prompts({"response_synthesizer:text_qa_template": qa_template})
 
+# Function to speak text using Speech Dispatcher
+def speak_text(text):
+    try:
+        # Use spd-say with -e to ensure it waits for the text to be spoken
+        # and -r for rate if you want to control speed (optional)
+        # You might also add -o for output module (e.g., "piper") if spd-say isn't defaulting correctly
+        subprocess.run(["spd-say", text], check=True)
+    except FileNotFoundError:
+        print("Warning: spd-say command not found. Speech output will not work. Is Speech Dispatcher installed?")
+    except subprocess.CalledProcessError as e:
+        print(f"Error calling spd-say: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred during speech output: {e}")
+
+# --- Configure Query Engine with Persona ---
+query_engine = index.as_query_engine(
+    similarity_top_k=3 # You can adjust this value to retrieve more or fewer relevant chunks
+)
+
+print("\nQuerying the index...")
+
+# Function to speak text using Speech Dispatcher
+def speak_text(text):
+    try:
+        subprocess.run(["spd-say", text], check=True)
+    except FileNotFoundError:
+        print("Warning: spd-say command not found. Speech output will not work. Is Speech Dispatcher installed?")
+    except subprocess.CalledProcessError as e:
+        print(f"Error calling spd-say: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred during speech output: {e}")
+
+# --- Configure Query Engine with Persona ---
+# This line was duplicated in your original post, ensuring it's only here once
+query_engine = index.as_query_engine(
+    similarity_top_k=3 # You can adjust this value to retrieve more or fewer relevant chunks
+)
 
 print("\nQuerying the index...")
 
@@ -109,6 +147,10 @@ while True:
 
         response = query_engine.query(query)
         print(f"Kaia's Response: {response}\n")
+
+        # This line was correctly added to make Kaia speak!
+        speak_text(str(response))
+
     except Exception as e:
         print(f"An error occurred during query processing: {e}")
         # Optionally, you can add more specific error handling or just break
