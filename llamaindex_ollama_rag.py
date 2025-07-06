@@ -66,8 +66,7 @@ except Exception as e:
     print(f"Error loading Kaia's persona document from {persona_doc_path}: {e}. Ensure the file exists and is readable.")
 
 if not kaia_persona_content:
-    print("CRITICAL WARNING: Kaia's persona content is missing. Responses may be generic.")
-
+    print("Warning: Kaia's persona content is missing. Responses may be generic.")
 
 # --- Create Index ---
 print("Creating index from all loaded documents (this might take a moment)...")
@@ -112,30 +111,6 @@ def speak_text(text):
     except Exception as e:
         print(f"An unexpected error occurred during speech output: {e}")
 
-# --- Configure Query Engine with Persona ---
-query_engine = index.as_query_engine(
-    similarity_top_k=3 # You can adjust this value to retrieve more or fewer relevant chunks
-)
-
-print("\nQuerying the index...")
-
-# Function to speak text using Speech Dispatcher
-def speak_text(text):
-    try:
-        subprocess.run(["spd-say", text], check=True)
-    except FileNotFoundError:
-        print("Warning: spd-say command not found. Speech output will not work. Is Speech Dispatcher installed?")
-    except subprocess.CalledProcessError as e:
-        print(f"Error calling spd-say: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred during speech output: {e}")
-
-# --- Configure Query Engine with Persona ---
-# This line was duplicated in your original post, ensuring it's only here once
-query_engine = index.as_query_engine(
-    similarity_top_k=3 # You can adjust this value to retrieve more or fewer relevant chunks
-)
-
 print("\nQuerying the index...")
 
 # --- Interactive Query Loop ---
@@ -146,12 +121,13 @@ while True:
             break
 
         response = query_engine.query(query)
-        print(f"Kaia's Response: {response}\n")
+        print(f"{response}\n")
 
-        # This line was correctly added to make Kaia speak!
-        speak_text(str(response))
+        # Clean the response text for speech output
+        clean_response_text = str(response).replace("\\", "").replace("\n", " ").replace("\t", " ")
+        speak_text(clean_response_text)
 
     except Exception as e:
         print(f"An error occurred during query processing: {e}")
         # Optionally, you can add more specific error handling or just break
-        break
+        # break
