@@ -111,6 +111,21 @@ def speak_text(text):
     except Exception as e:
         print(f"An unexpected error occurred during speech output: {e}")
 
+# --- TTS Toggle ---
+tts_enabled = False
+while True:
+    tts_choice = input("Enable Text-to-Speech (y/n)? ").lower().strip()
+    if tts_choice == 'y':
+        tts_enabled = True
+        print("Text-to-Speech is ON.")
+        break
+    elif tts_choice == 'n':
+        tts_enabled = False
+        print("Text-to-Speech is OFF.")
+        break
+    else:
+        print("Invalid input. Please enter 'y' or 'n'.")
+
 print("\nQuerying the index...")
 
 # --- Interactive Query Loop ---
@@ -125,7 +140,8 @@ while True:
 
         # Clean the response text for speech output
         clean_response_text = str(response).replace("\\", "").replace("\n", " ").replace("\t", " ")
-        speak_text(clean_response_text)
+        if tts_enabled: # Only call speak_text if TTS is enabled
+            speak_text(clean_response_text)
 
     except Exception as e:
         print(f"An error occurred during query processing: {e}")
