@@ -94,6 +94,57 @@ def speak_text(text):
     except Exception as e:
         print(f"An unexpected error occurred during speech output: {e}")
 
+# --- Dynamic System Status Function ---
+def get_dynamic_system_status():
+    """Gathers basic system information dynamically on Linux."""
+    info_lines = []
+    info_lines.append("Your current system configuration is:")
+
+    # Helper function to safely run shell commands
+    def _get_output(command, default_value="N/A"):
+        try:
+            # Use shell=True for pipes, but be cautious with untrusted input (not an issue here)
+            # Timeout helps prevent hanging if a command is slow or interactive
+            return subprocess.check_output(command, shell=True, text=True, timeout=3).strip()
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+            return default_value
+
+    # OS and Kernel
+    os_name = _get_output('uname -o')
+    machine_arch = _get_output('uname -m')
+    info_lines.append(f"OS: {os_name} {machine_arch}")
+    info_lines.append(f"Kernel: {_get_output('uname -r')}")
+
+    # CPU
+    cpu_model = _get_output("grep 'model name' /proc/cpuinfo | head -n 1 | cut -d: -f2- | xargs", "N/A")
+    cpu_cores = _get_output("grep 'cpu cores' /proc/cpuinfo | head -n 1 | cut -d: -f2- | xargs", "N/A")
+    info_lines.append(f"CPU: {cpu_model} ({cpu_cores} cores)")
+
+    # Memory (using free -h for human-readable format)
+    mem_info_raw = _get_output("free -h | grep Mem:", "")
+    if mem_info_raw:
+        parts = mem_info_raw.split()
+        if len(parts) >= 3: # Expected format: Mem: Total Used Free ...
+            total_mem = parts[1]
+            used_mem = parts[2]
+            info_lines.append(f"Memory: {used_mem} / {total_mem}")
+        else:
+            info_lines.append(f"Memory: {mem_info_raw} (parse error)")
+    else:
+        info_lines.append("Memory: N/A")
+
+    # Terminal
+    info_lines.append(f"Terminal: {os.environ.get('TERM', 'N/A')}")
+
+    # Note on info requiring elevated privileges or specialized tools
+    info_lines.append("Board: (Requires 'dmidecode' or similar, often sudo)")
+    info_lines.append("BIOS (UEFI): (Requires 'dmidecode' or similar, often sudo)")
+    info_lines.append("Vulkan: (Requires 'vulkaninfo' or GPU driver tools)")
+    info_lines.append("OpenCL: (Requires 'clinfo' or GPU driver tools)")
+
+    return "\n".join(info_lines)
+# --- End Dynamic System Status Function ---
+
 # --- TTS Toggle ---
 tts_enabled = False
 while True:
@@ -111,31 +162,18 @@ while True:
 
 print("\nQuerying the index...")
 
-# --- System Status Information (for /status command) ---
-SYSTEM_STATUS_INFO = """
-Your current system configuration is:
-Board: ROG STRIX B650-A GAMING WIFI (Rev 1.xx)
-BIOS (UEFI): 3257 (32.57)
-OS: Arch Linux x86_64
-Kernel: Linux 6.15.4-arch2-1
-CPU: AMD Ryzen 5 9600X (12) @ 5.49 GHz
-Memory: 3.22 GiB / 31.00 GiB (10%)
-Vulkan: 1.4.303 - NVIDIA [575.64.03]
-OpenCL: 3.0 CUDA 12.9.90
-Terminal: konsole 25.4.3
-"""
 
 # --- Interactive Query Loop (MODIFIED for Command Parsing) ---
 while True:
     try:
-        query = input("Query (type 'exit' to quit): ").strip() # Added .strip() for cleaner input
+        query = input("Query (type 'exit' to quit): ").strip()
 
         if query.lower() == 'exit':
             break
 
-        # --- Command Parsing Logic (NEW) ---
+        # --- Command Parsing Logic ---
         if query.startswith('/'):
-            command = query[1:].lower().split(' ')[0] # Get command (e.g., "help" from "/help extra")
+            command = query[1:].lower().split(' ')[0]
 
             output_message = ""
             if command == 'help':
@@ -147,7 +185,8 @@ while True:
                     "You can also just type your question to query Kaia's knowledge."
                 )
             elif command == 'status':
-                output_message = SYSTEM_STATUS_INFO
+                # Call the new dynamic function here
+                output_message = get_dynamic_system_status()
             else:
                 output_message = f"Unknown command: /{command}. Type /help for available commands."
 
@@ -156,10 +195,9 @@ while True:
                 clean_speech_text = output_message.replace("\\", "").replace("\n", " ").replace("\t", " ")
                 speak_text(clean_speech_text)
 
-            continue # Skip to the next loop iteration after handling a command
+            continue
         # --- End Command Parsing Logic ---
 
-        # If it's not a command, process with the chat engine
         response = chat_engine.chat(query)
         clean_response_text = response.response
 
@@ -172,6 +210,5 @@ while True:
 
     except Exception as e:
         print(f"An error occurred during query processing: {e}")
-        # Optionally, you can add more specific error handling or just break
-        # break
-git status
+
+
