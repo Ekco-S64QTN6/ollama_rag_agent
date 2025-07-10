@@ -33,8 +33,15 @@ PERSONA_DIR = "./data"
 PERSIST_DIR = "./storage"
 
 # --- Initialize Ollama LLM and Embedding Model ---
-Settings.llm = Ollama(model=LLM_MODEL, request_timeout=360.0)
-Settings.embed_model = OllamaEmbedding(model_name=EMBEDDING_MODEL)
+try:
+    Settings.llm = Ollama(model=LLM_MODEL, request_timeout=360.0)
+    Settings.embed_model = OllamaEmbedding(model_name=EMBEDDING_MODEL)
+    print(f"Ollama LLM ('{LLM_MODEL}') and Embedding Model ('{EMBEDDING_MODEL}') initialized successfully.")
+except Exception as e:
+    logging.error(f"Failed to initialize Ollama LLM or Embedding Model: {e}")
+    logging.error("Please ensure the Ollama server is running and the specified models are downloaded.")
+    logging.error("You can check Ollama status with 'ollama list' and 'ollama serve'.")
+    sys.exit(1) # Graceful exit if LLM/Embedding models cannot be initialized
 
 # --- Load Persona document directly ---
 kaia_persona_content = ""
@@ -66,6 +73,11 @@ if not os.path.exists(PERSIST_DIR):
 
     all_documents = general_docs + personal_docs
     print(f"Total {len(all_documents)} document(s) loaded for indexing.")
+
+    # --- NEW: Exit if no documents found for indexing ---
+    if not all_documents:
+        logging.error("No documents (general knowledge or personal context) found to build the index. Exiting.")
+        sys.exit(1)
 
     index = VectorStoreIndex.from_documents(all_documents)
     index.storage_context.persist(persist_dir=PERSIST_DIR)
@@ -210,5 +222,3 @@ while True:
 
     except Exception as e:
         print(f"An error occurred during query processing: {e}")
-
-

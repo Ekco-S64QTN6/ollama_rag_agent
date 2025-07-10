@@ -88,3 +88,61 @@ This document contains general Linux commands, concepts, and troubleshooting tip
 -   **Backup Strategy:** Emphasize regular backups of important data.
 -   **The Unix Philosophy:** "Do one thing and do it well."
 -   **Dotfiles:** Mention the concept of managing configuration files (dotfiles) for system personalization.
+
+## 7. User and Group Management
+
+-   `sudo [command]`: Execute a command as the superuser.
+-   `useradd [options] [username]`: Create a new user account.
+-   `userdel [options] [username]`: Delete a user account.
+-   `usermod [options] [username]`: Modify user account properties.
+-   `passwd [username]`: Change a user's password.
+-   `groupadd [groupname]`: Create a new group.
+-   `groupdel [groupname]`: Delete a group.
+-   `groups [username]`: Display the groups a user belongs to.
+-   `id [username]`: Print user and group IDs.
+
+## 8. Environmental Variables and Shell Customization
+
+-   `printenv` or `env`: Display all environment variables.
+-   `echo $[VARIABLE_NAME]`: Display the value of a specific environment variable (e.g., `echo $PATH`).
+-   `export [VARIABLE_NAME]=[value]`: Set an environment variable for the current session and child processes.
+-   `~/.bashrc`, `~/.zshrc`: Shell configuration files for interactive shells.
+-   `~/.profile`, `~/.bash_profile`: Login shell configuration files.
+-   `PATH`: Environment variable listing directories where executables are searched.
+
+## 9. I/O Redirection and Pipes
+
+-   `command > file`: Redirect standard output to a file (overwrite).
+-   `command >> file`: Redirect standard output to a file (append).
+-   `command < file`: Redirect standard input from a file.
+-   `command 2> error_file`: Redirect standard error to a file.
+-   `command &> file`: Redirect both standard output and standard error to a file.
+-   `command1 | command2`: Pipe the standard output of `command1` as standard input to `command2`.
+-   `tee [file]`: Read from standard input and write to both standard output and one or more files.
+
+## 10. Scheduling Tasks (Cron)
+
+-   `crontab -e`: Edit the current user's crontab file.
+-   `crontab -l`: List the current user's crontab entries.
+-   `crontab -r`: Remove the current user's crontab file.
+-   Cron syntax: `* * * * * command_to_execute` (minute, hour, day of month, month, day of week).
+
+## 11. Advanced Troubleshooting & Diagnostics
+
+### Network Diagnostics
+-   `ss -tunlp`: List all listening TCP/UDP sockets with associated processes (requires root for process info).
+-   `netstat -tulnp`: (Older, but common) Same as above.
+-   `traceroute [hostname/IP]`: Trace the route packets take to a network host.
+-   `nslookup [hostname/IP]` or `dig [hostname/IP]`: Query DNS servers.
+-   `nmap [options] [target]`: Network scanner for discovery and security auditing (often needs installation: `sudo pacman -S nmap`).
+
+### System Logs
+-   `/var/log/`: Directory containing various system logs (e.g., `syslog`, `auth.log`, `kern.log`).
+-   `dmesg`: Display kernel ring buffer messages (boot messages, device drivers).
+
+### Hardware & Kernel Modules
+-   `lsmod`: List loaded kernel modules.
+-   `modprobe [module_name]`: Add or remove a kernel module.
+-   `lspci`: List all PCI devices.
+-   `lsusb`: List USB devices.
+-   `lshw -short`: Summarize hardware configuration (often needs installation: `sudo pacman -S lshw`).
