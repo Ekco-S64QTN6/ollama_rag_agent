@@ -146,3 +146,48 @@ This document contains general Linux commands, concepts, and troubleshooting tip
 -   `lspci`: List all PCI devices.
 -   `lsusb`: List USB devices.
 -   `lshw -short`: Summarize hardware configuration (often needs installation: `sudo pacman -S lshw`).
+
+## 12. Basic Text Editors
+
+-   **Nano:**
+    -   `nano [file]`: Open a file in the Nano editor.
+    -   **Usage:** Simple, user-friendly text editor. Commands are displayed at the bottom of the screen (e.g., `^X` to exit, `^O` to save).
+
+-   **Vim (Very basic overview):**
+    -   `vim [file]`: Open a file in the Vim editor.
+    -   **Modes:**
+        -   **Normal Mode (default):** For navigation and commands.
+        -   **Insert Mode (press `i`):** For typing text.
+    -   **Saving & Quitting:**
+        -   Press `Esc` to return to Normal Mode.
+        -   `:w` (write/save), `:q` (quit), `:wq` (write and quit), `:q!` (quit without saving).
+
+## 13. More on File Archiving and Compression
+
+-   **Gzip/Gunzip:**
+    -   `gzip [file]`: Compress file into `.gz` format (replaces original).
+    -   `gunzip [file.gz]`: Decompress `.gz` file (replaces original).
+    -   `gzip -d [file.gz]`: Same as `gunzip`.
+    -   `zcat [file.gz]`: View compressed file content without decompressing.
+
+-   **Bzip2/Bunzip2:**
+    -   `bzip2 [file]`: Compress file into `.bz2` format.
+    -   `bunzip2 [file.bz2]`: Decompress `.bz2` file.
+    -   `bzcat [file.bz2]`: View compressed file content without decompressing.
+
+-   **Xz/Unxz:**
+    -   `xz [file]`: Compress file into `.xz` format.
+    -   `unxz [file.xz]`: Decompress `.xz` file.
+    -   `xzcat [file.xz]`: View compressed file content without decompressing.
+
+-   **Zip/Unzip:** (For cross-platform archives)
+    -   `zip [archive_name].zip [files/directories]`: Create a zip archive.
+    -   `unzip [archive_name].zip`: Extract files from a zip archive.
+
+## 14. System Information and Uptime
+
+-   `uptime`: Show how long the system has been running, number of users, and load averages.
+-   `hostname`: Display the system's hostname.
+-   `whoami`: Print the effective username of the current user.
+-   `w`: Display who is logged on and what they are doing.
+-   `history`: Display the shell command history.
