@@ -156,7 +156,15 @@ def get_dynamic_system_status():
 
     return "\n".join(info_lines)
 # --- End Dynamic System Status Function ---
-
+print(f"\033[36m" + """
+██╗  ██╗ █████╗ ██╗ █████╗
+██║ ██╔╝██╔══██╗██║██╔══██╗
+█████╔╝ ███████║██║███████║
+██╔═██╗ ██╔══██║██║██╔══██║
+██║  ██╗██║  ██║██║██║  ██║
+╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝
+""" + "\033[0m")
+print("\nKaia (Personal AI Assistant)\n")
 # --- TTS Toggle ---
 tts_enabled = False
 while True:
@@ -175,7 +183,7 @@ while True:
 print("\nQuerying the index...")
 
 
-# --- Interactive Query Loop (MODIFIED for Command Parsing) ---
+# --- Interactive Query Loop ---
 while True:
     try:
         query = input("Query (type 'exit' to quit): ").strip()
@@ -197,12 +205,12 @@ while True:
                     "You can also just type your question to query Kaia's knowledge."
                 )
             elif command == 'status':
-                # Call the new dynamic function here
                 output_message = get_dynamic_system_status()
             else:
                 output_message = f"Unknown command: /{command}. Type /help for available commands."
 
-            print(f"{output_message}\n")
+            # Corrected Indentation for these lines:
+            print(f"\033[36m{output_message}\033[0m\n")
             if tts_enabled:
                 clean_speech_text = output_message.replace("\\", "").replace("\n", " ").replace("\t", " ")
                 speak_text(clean_speech_text)
@@ -213,7 +221,7 @@ while True:
         response = chat_engine.chat(query)
         clean_response_text = response.response
 
-        print(f"{clean_response_text}\n")
+        print(f"\033[36m{clean_response_text}\033[0m\n")
 
         clean_speech_text = clean_response_text.replace("\\", "").replace("\n", " ").replace("\t", " ")
 
