@@ -23,7 +23,7 @@ logging.getLogger("llama_index.core.indices").setLevel(logging.WARNING)
 # --------------------------------------------------------
 
 # --- Ollama Model Configuration ---
-LLM_MODEL = "mistral"
+LLM_MODEL = "llama2:13b-chat-q5_K_M"
 EMBEDDING_MODEL = "nomic-embed-text"
 
 # --- Directory Paths ---
