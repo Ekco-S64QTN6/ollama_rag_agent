@@ -6,6 +6,12 @@ import time
 import json
 import requests
 import chromadb
+# --- ANSI Color Codes ---
+COLOR_GREEN = "\033[92m"  # For success messages
+COLOR_BLUE = "\033[94m"   # For informational messages/loading
+COLOR_YELLOW = "\033[93m" # For warnings/non-critical errors
+COLOR_RED = "\033[91m"    # For critical errors
+COLOR_RESET = "\033[0m"   # Resets color to default
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
 from llama_index.core import StorageContext, load_index_from_storage
 from llama_index.core.memory import ChatMemoryBuffer
@@ -25,11 +31,19 @@ PERSONA_DIR = "./data"
 PERSIST_DIR = "./storage"
 CHROMA_DB_PATH = "./storage/chroma_db"
 LLAMA_INDEX_METADATA_PATH = "./storage/llama_index_metadata"
+TTS_ENABLED = False
 
 # --- Logging ---
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-for noisy in ["httpx", "httpcore", "llama_index.core.chat_engine", "llama_index.core.llms", "llama_index.core.indices"]:
-    logging.getLogger(noisy).setLevel(logging.WARNING)
+logging.basicConfig(stream=sys.stdout, level=logging.ERROR)  # Set base level to ERROR
+for noisy in [
+    "httpx",
+    "httpcore",
+    "llama_index",
+    "chromadb",
+    "fsspec",
+    "urllib3"
+]:
+    logging.getLogger(noisy).setLevel(logging.CRITICAL)  # Set to CRITICAL to suppress almost all messages
 
 # --- Initialize Models ---
 session = requests.Session()
@@ -37,9 +51,9 @@ try:
     Settings.llm = Ollama(model=LLM_MODEL, request_timeout=360.0, stream=True)
     Settings.embed_model = OllamaEmbedding(model_name=EMBEDDING_MODEL)
     _ = Settings.llm.complete("Hello")
-    print("LLM initialized and warmed up.")
+    print(f"{COLOR_GREEN}LLM initialized and warmed up.{COLOR_RESET}")
 except Exception as e:
-    logging.error(f"Failed to initialize Ollama: {e}")
+    logging.error(f"{COLOR_RED}Failed to initialize Ollama: {e}{COLOR_RESET}")
     sys.exit(1)
 
 # --- Load Persona ---
@@ -47,32 +61,36 @@ persona_doc_path = os.path.join(PERSONA_DIR, "Kaia_Desktop_Persona.md")
 try:
     kaia_persona_content = SimpleDirectoryReader(input_files=[persona_doc_path]).load_data()[0].text
     kaia_persona_content = kaia_persona_content.replace('\x00', '').replace('\u0000', '')
-    print("Kaia persona loaded.")
+    print(f"{COLOR_GREEN}Kaia persona loaded.{COLOR_RESET}")
 except Exception as e:
     kaia_persona_content = ""
-    print(f"Could not load persona: {e}")
+    print(f"{COLOR_YELLOW}Could not load persona: {e}{COLOR_RESET}")
 
 # --- Initialize ChromaDB Client ---
 try:
     os.makedirs(CHROMA_DB_PATH, exist_ok=True)
+    if not os.access(CHROMA_DB_PATH, os.W_OK):
+        logging.error(f"Insufficient permissions for ChromaDB path: {CHROMA_DB_PATH}. Please check directory permissions.")
+        sys.exit(1)
+
     db = chromadb.PersistentClient(path=CHROMA_DB_PATH)
     chroma_collection = db.get_or_create_collection("kaia_documents")
-    print(f"ChromaDB client initialized at '{CHROMA_DB_PATH}' with collection 'kaia_documents'.")
+    print(f"{COLOR_GREEN}ChromaDB client initialized at '{CHROMA_DB_PATH}' with collection 'kaia_documents'.{COLOR_RESET}")
 except Exception as e:
-    logging.error(f"Failed to initialize ChromaDB: {e}")
+    logging.error(f"{COLOR_RED}Failed to initialize ChromaDB: {e}{COLOR_RESET}")
     sys.exit(1)
 
 # --- Configure LlamaIndex to use ChromaDB ---
 vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
 
 if not os.path.exists(LLAMA_INDEX_METADATA_PATH):
-    print("LlamaIndex metadata not found. Building index...")
+    print(f"{COLOR_BLUE}LlamaIndex metadata not found. Building index...{COLOR_RESET}")
     general_docs = [doc for doc in SimpleDirectoryReader(GENERAL_KNOWLEDGE_DIR).load_data() if "Kaia_Desktop_Persona.md" not in doc.id_]
     personal_docs = SimpleDirectoryReader(PERSONAL_CONTEXT_DIR).load_data()
     all_docs = general_docs + personal_docs
 
     if not all_docs:
-        print("No documents found to build the index. Please check your data directories.")
+        print(f"{COLOR_YELLOW}No documents found to build the index. Please check your data directories.{COLOR_RESET}")
         sys.exit(1)
 
     storage_context = StorageContext.from_defaults(
@@ -83,29 +101,47 @@ if not os.path.exists(LLAMA_INDEX_METADATA_PATH):
         storage_context=storage_context
     )
     index.storage_context.persist(persist_dir=LLAMA_INDEX_METADATA_PATH)
-    print(f"Index built and LlamaIndex metadata saved to '{LLAMA_INDEX_METADATA_PATH}'.")
+    print(f"{COLOR_GREEN}Index built and LlamaIndex metadata saved to '{LLAMA_INDEX_METADATA_PATH}'.{COLOR_RESET}")
 else:
-    print(f"Loading index from '{LLAMA_INDEX_METADATA_PATH}' (using ChromaDB for vectors)...")
-    storage_context = StorageContext.from_defaults(
-        vector_store=vector_store,
-        persist_dir=LLAMA_INDEX_METADATA_PATH
-    )
-    index = load_index_from_storage(storage_context=storage_context)
-    print("Index loaded.")
+    print(f"{COLOR_BLUE}Loading index from '{LLAMA_INDEX_METADATA_PATH}' (using ChromaDB for vectors)...{COLOR_RESET}")
+    # Redirect stdout temporarily to suppress loading messages
+    original_stdout = sys.stdout
+    sys.stdout = open(os.devnull, 'w')
+    try:
+        storage_context = StorageContext.from_defaults(
+            vector_store=vector_store,
+            persist_dir=LLAMA_INDEX_METADATA_PATH
+        )
+        index = load_index_from_storage(storage_context=storage_context)
+    finally:
+        sys.stdout = original_stdout
+    print(f"{COLOR_GREEN}Index loaded.{COLOR_RESET}")
 
-chat_engine = index.as_chat_engine(
-    chat_mode="condense_plus_context",
-    memory=ChatMemoryBuffer.from_defaults(token_limit=1000),
-    system_prompt=kaia_persona_content,
-    similarity_top_k=2
-)
+def get_chat_engine():
+    if not hasattr(get_chat_engine, '_cached_engine'):
+        get_chat_engine._cached_engine = index.as_chat_engine(
+            chat_mode="condense_plus_context",
+            memory=ChatMemoryBuffer.from_defaults(token_limit=1000),
+            system_prompt=kaia_persona_content,
+            similarity_top_k=2
+        )
+    return get_chat_engine._cached_engine
+
+chat_engine = get_chat_engine()
 
 # --- Helpers ---
 def speak_text_async(text):
     try:
-        subprocess.Popen(["spd-say", text])
-    except Exception:
-        pass
+        subprocess.run(
+            ["spd-say", "--wait", text],
+            check=True,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE
+        )
+    except subprocess.CalledProcessError as e:
+        logging.error(f"TTS failed: {e.stderr.decode().strip()}")
+    except FileNotFoundError:
+        logging.warning("TTS not available: Install 'speech-dispatcher'")
 
 def get_dynamic_system_status_with_gpu():
     def _get_output(cmd, default="N/A"):
@@ -137,6 +173,28 @@ def get_dynamic_system_status_with_gpu():
 
     return "\n".join(lines)
 
+def confirm_and_execute_command(command):
+    if any(blocked in command for blocked in [';', '&&', '||', '`', '$(', '>', '<', '|']):
+        print("\033[31mKaia: Dangerous command pattern detected - aborting command execution.\033[0m")
+        return
+
+    print(f"\n\033[33mKaia: Do you want to execute this command? (y/n)\nCommand: {command}\033[0m")
+    confirmation = input("Your choice: ").lower().strip()
+    if confirmation == 'y':
+        try:
+            result = subprocess.run(command, shell=True, check=True, text=True, capture_output=True)
+            print(f"\033[32mCommand Output:\n{result.stdout}\033[0m")
+            if result.stderr:
+                print(f"\033[31mCommand Error:\n{result.stderr}\033[0m")
+        except subprocess.CalledProcessError as e:
+            print(f"\033[31mCommand failed with exit code {e.returncode}:\n{e.stderr}\033[0m")
+        except FileNotFoundError:
+            print("\033[31mError: Command not found.\033[0m")
+        except Exception as e:
+            print(f"\033[31mAn unexpected error occurred while executing command: {e}\033[0m")
+    else:
+        print("Kaia: Command execution aborted.")
+
 def generate_action_plan(user_input):
     system_prompt = """
     You are an AI assistant named Kaia. Your task is to classify the user's intent to determine the next action.
@@ -147,19 +205,6 @@ def generate_action_plan(user_input):
 
     If the user's query clearly indicates an intent to run a shell command (e.g., asking to 'list files', 'check disk space', 'show running processes', 'install a package'), set "action" to "command" and "content" to the actual Linux command.
     For all other queries, including general questions, requests for information, or conversational chat, set "action" to "chat" and "content" to the user's original query or a rephrased version suitable for the chat engine.
-
-    Examples:
-    User: list files in current directory
-    Response: {"action": "command", "content": "ls -F"}
-
-    User: check my disk usage
-    Response: {"action": "command", "content": "df -h"}
-
-    User: tell me about yourself
-    Response: {"action": "chat", "content": "tell me about yourself"}
-
-    User: What is the capital of France?
-    Response: {"action": "chat", "content": "What is the capital of France?"}
     """
     payload = {
         "model": DEFAULT_COMMAND_MODEL,
@@ -168,12 +213,11 @@ def generate_action_plan(user_input):
             {"role": "user", "content": user_input}
         ],
         "stream": False,
-        "format": "json" # <--- IMPORTANT: This tells Ollama to try to force JSON output
+        "format": "json"
     }
     try:
         response = session.post("http://localhost:11434/api/chat", json=payload, timeout=360)
         result = response.json()["message"]["content"].strip()
-        # The raw LLM response debug print has been moved to the main loop.
         return json.loads(result)
     except json.JSONDecodeError as e:
         print(f"Error decoding JSON from action plan: {e}. Raw response was: '{result}'")
@@ -184,22 +228,19 @@ def generate_action_plan(user_input):
 
 # --- Main Loop ---
 print("""\033[36m
-██╗  ██╗ █████╗ ██╗ █████╗
+██╗  ██╗ █████╗ ██╗ █████╗
 ██║ ██╔╝██╔══██╗██║██╔══██╗
 █████╔╝ ███████║██║███████║
 ██╔═██╗ ██╔══██║██║██╔══██║
-██║  ██╗██║  ██║██║██║  ██║
-╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝\033[0m
+██║  ██╗██║  ██║██║██║  ██║
+╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝\033[0m
 Kaia (Personal AI Assistant)""")
-
-tts_enabled = input("Enable TTS? (y/n): ").lower().strip() == 'y'
 
 while True:
     try:
         query = input("\nQuery (type 'exit' to quit): ").strip()
         if query == 'exit':
             break
-
 
         if not query:
             continue
@@ -213,11 +254,10 @@ while True:
             else:
                 msg = f"Unknown command: /{cmd}".replace('\x00', '').replace('\u0000', '')
             print(f"\033[36m{msg}\033[0m")
-            if tts_enabled: speak_text_async(msg.replace("\n", " "))
+            if TTS_ENABLED: speak_text_async(msg.replace("\n", " "))
             continue
 
         plan = generate_action_plan(query)
-        # print(f"\nDEBUG: Action Plan (parsed): {plan}") # Commented out debug output
         action = plan.get("action")
         content = plan.get("content", "")
 
@@ -239,14 +279,14 @@ while True:
                 full_response += token
             print("\033[0m\n")
 
-            if tts_enabled:
+            if TTS_ENABLED:
                 clean_speech_text = full_response.replace("\\", "").replace("\n", " ").replace("\t", " ")
                 speak_text_async(clean_speech_text)
 
         else:
             msg = "Kaia: I could not determine the appropriate action for your request. Please try rephrasing."
             print(f"\033[36m{msg}\033[0m")
-            if tts_enabled:
+            if TTS_ENABLED:
                 speak_text_async(msg.replace("\n", " "))
 
     except Exception as e:

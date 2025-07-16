@@ -1,44 +1,107 @@
 # Kaia: **K**aia **A**rtificial **I**ntelligence **A**ssistant
 
-## Overview
-
-Kaia is a personal AI assistant designed to enhance your Linux desktop experience. Built with LlamaIndex and Ollama, Kaia provides conversational AI capabilities augmented by a personal knowledge base (RAG) and intelligent, natural language-driven command execution.
-
-## Features
-
-* **Conversational AI:** Engage in natural dialogues with Kaia, powered by local LLMs (e.g., Llama2).
-* **Contextual Understanding (RAG):** Kaia leverages a personalized knowledge base to provide informed and relevant responses.
-* **Intelligent Command Execution:**
-    * Interpret natural language requests (e.g., "list my home dir", "check disk space") into precise Linux shell commands.
-    * Propose commands for user confirmation before execution, ensuring safety and control.
-* **Optimized Performance:** Features include LLM warm-up, streaming responses, and efficient context handling for a responsive experience.
-* **Text-to-Speech (Optional):** Supports spoken responses via Speech Dispatcher (`spd-say`).
-
-## Screenshot
 ![Kaia CLI Screenshot](images/kaia_cli_screenshot.png)
 
+## Overview
 
-## Quick Start
+Kaia is an advanced local AI assistant combining:
+- **Mistral-Instruct:** For natural language understanding and conversational AI.
+- **ChromaDB + LlamaIndex:** For powerful contextual Retrieval-Augmented Generation (RAG).
+- **Intelligent Command Execution:** Understands natural language requests to propose and execute Linux shell commands.
+- **Text-to-Speech (Optional):** Provides spoken responses via Piper/speech-dispatcher.
 
-To get Kaia up and running:
+## Key Features
 
-1.  **Ensure Ollama is running:** Make sure the Ollama server is active and the `llama2:13b-chat-q4_0`, `nomic-embed-text`, and `mixtral:8x7b-instruct-v0.1-q4_K_M` models are downloaded.
-2.  **Clone the Repository:**
-    ```bash
-    git clone https://github.com/Ekco-S64QTN6/ollama_rag_agent.git
-    cd your-kaia-project
-    ```
-3.  **Set Up Python Environment:**
-    ```bash
-    python3 -m venv .venv
-    source .venv/bin/activate
-    pip install -r requirements.txt
-    ```
-4.  **Prepare Knowledge Bases:**
-    * Place your general knowledge documents in the `./data` directory.
-    * Place your personal context documents in the `./personal_context` directory.
-    * Ensure your `Kaia_Desktop_Persona.md` is in `./data`.
-5.  **Run Kaia:**
-    ```bash
-    python llamaindex_ollama_rag.py
-    ```
+### Core Capabilities
+- Natural language conversations with persona consistency
+- Context-aware responses using personal/general knowledge
+- Safe Linux command generation & execution
+- Real-time system monitoring (`/status`)
+- Streaming responses with first-token latency metrics
+
+### Technical Highlights
+- Persistent ChromaDB vector storage
+- Ollama API with strict JSON response enforcement
+- Configurable TTS backend (Piper recommended)
+- GPU awareness (NVIDIA monitoring)
+- Pre-warmed LLM for reduced cold-start latency
+
+## Installation
+
+### Prerequisites
+- Ollama server running (`mistral:instruct` and `nomic-embed-text` models)
+- Python 3.10+
+- speech-dispatcher + Piper TTS (optional)
+
+```bash
+# On Arch Linux:
+yay -S piper-tts-bin speech-dispatcher piper-voices-en-us
+sudo systemctl enable --now speech-dispatcher.service
+```
+## Setup
+
+```bash
+git clone [https://github.com/Ekco-S64QTN6/ollama_rag_agent.git](https://github.com/Ekco-S64QTN6/ollama_rag_agent.git)
+cd kaia-assistant
+
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Prepare knowledge bases
+```bash
+mkdir -p data personal_context
+echo "Place your Markdown knowledge files here" > data/README.md
+```
+
+## Configuration
+
+Edit llamaindex_ollama_rag.py to customize:
+
+# Core settings (lines 20-30)
+```python
+LLM_MODEL = "mistral:instruct"          # Primary chat model
+TTS_ENABLED = True                      # Auto-detect if unset
+CHROMA_DB_PATH = "./storage/chroma_db"  # Vector store location
+```
+# Usage
+```python
+python llamaindex_ollama_rag.py
+```
+
+# First run will build vector indexes
+# Subsequent runs load persisted indexes
+
+# Interaction Examples
+```bash
+Query: check disk space
+Kaia (Command): df -h
+
+Query: explain ChromaDB
+Kaia: ChromaDB is an open-source vector database...
+
+Query: /status
+[Displays real-time system metrics]
+```
+
+# Symptoms
+- TTS not working	Verify spd-say "test" works first
+- Ollama timeouts	Increase request_timeout in config
+- Missing persona	Ensure Kaia_Desktop_Persona.md exists in ./data
+
+## Contributing
+
+This project welcomes:
+
+    Documentation improvements
+
+    Additional TTS backend integrations
+
+    Enhanced safety checks for command execution
+    
+    Other
+
+License
+
+MIT License - See LICENSE.md
