@@ -191,3 +191,19 @@ This document contains general Linux commands, concepts, and troubleshooting tip
 -   `whoami`: Print the effective username of the current user.
 -   `w`: Display who is logged on and what they are doing.
 -   `history`: Display the shell command history.
+
+# Advanced Command Combinations
+- `journalctl -xe | grep -i error`: Filter system logs for errors
+- `rsync -avz --progress /source user@remote:/dest`: Detailed progress during transfer
+- `find / -type f -size +100M -exec ls -lh {} +`: Find large files
+
+## Common Troubleshooting Scenarios
+
+### Network Issues
+1. `ip link show` → Check interface status
+2. `sudo systemctl restart NetworkManager`
+3. Check `/etc/resolv.conf` for DNS settings
+
+### Performance Diagnostics
+- `iotop` → Disk I/O monitoring
+- `nethogs` → Per-process network usage

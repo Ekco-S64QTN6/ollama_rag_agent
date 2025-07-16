@@ -1,3 +1,14 @@
+# ChromaDB Integration Guide
+
+## Vector Storage Details
+- Location: `./storage/chroma_db`
+- Collection: `kaia_documents`
+- Embedding Model: `nomic-embed-text`
+
+## Maintenance Commands
+- To rebuild indexes: `rm -rf ./storage/chroma_db`
+- Size optimization: `VACUUM;` (SQLite command)
+
 # ChromaDB: An Open-Source Vector Database
 
 ChromaDB is a type of database, specifically a vector database, designed for efficiently storing, querying, and managing vector embeddings. Vector embeddings are numerical representations of data like text, images, or audio, capturing their semantic meaning and relationships.
