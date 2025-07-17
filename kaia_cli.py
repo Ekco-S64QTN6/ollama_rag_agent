@@ -1,113 +1,141 @@
+#!/usr/bin/env python3
+"""
+Kaia CLI Module - Provides secure command generation and execution for the main Kaia interface.
+"""
+
 import requests
-import json
 import subprocess
 import os
+import logging
+from typing import Optional, Tuple
 
-# --- Kaia CLI Configuration ---
+# --- Configuration ---
 OLLAMA_API_URL = "http://localhost:11434/api/chat"
-DEFAULT_COMMAND_MODEL = "mixtral:8x7b-instruct-v0.1-q4_K_M"
+DEFAULT_COMMAND_MODEL = "mistral:instruct"
+TIMEOUT_SECONDS = 300  # 5 minutes
+DANGEROUS_PATTERNS = [';', '&&', '||', '`', '$(', '>', '<', '|']
 
-# --- Ollama API Interaction Function ---
-def ask_ollama_for_command(user_query, model=DEFAULT_COMMAND_MODEL):
+# --- Logging Setup ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.FileHandler('kaia_cli.log')]
+)
+logger = logging.getLogger(__name__)
 
-    messages = [
-        {"role": "system", "content": "You are a highly intelligent and precise Linux expert named Kaia. Your primary goal is to provide *only* the exact shell command required to fulfill a user's request. Do not include any explanations, introductory text, or extra characters. The command should be ready to execute directly. Your response MUST NOT contain any Markdown formatting, like backticks (```), or language indicators (e.g., `bash`, `sh`). If a task requires multiple commands, provide them separated by ' && '. If a task is impossible, ambiguous, or highly dangerous, respond *only* with 'ERROR: Cannot generate a safe command for this request.'"},
-        {"role": "user", "content": user_query}
-    ]
+class KaiaCLI:
+    """Core command generation and execution functionality."""
 
-    payload = {
-        "model": model,
-        "messages": messages,
-        "stream": False
-    }
+    def __init__(self, model: str = DEFAULT_COMMAND_MODEL):
+        self.model = model
+        self.last_command = None
+        self.last_output = None
 
-    print(f"\nKaia: Consulting with '{model}' model for command generation...")
-    try:
-        response = requests.post(OLLAMA_API_URL, json=payload, timeout=300) # 5 min timeout
-        response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
-        full_response = response.json()
-        command = full_response['message']['content'].strip()
+    def generate_command(self, user_query: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Generate a Linux command from natural language.
 
-        if command.startswith("```"):
+        Args:
+            user_query: Natural language description of desired command
 
-            command = command.split('\n', 1)[1]
-        if command.endswith("```"):
+        Returns:
+            tuple: (generated_command, error_message) - one will be None
+        """
+        system_prompt = """You are Kaia, a precise Linux expert. Provide ONLY the exact shell command needed.
+Rules:
+1. No explanations, intros, or extra text
+2. No Markdown formatting (``` or language indicators)
+3. For multiple commands, use ' && ' between them
+4. If unsafe/ambiguous, respond ONLY with: 'ERROR: Cannot generate safe command'
+"""
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_query}
+            ],
+            "stream": False
+        }
 
-            command = command[:-3]
-        command = command.strip()
-
-        return command
-    except requests.exceptions.Timeout:
-        print("Kaia: The Ollama model took too long to respond.")
-        return "ERROR: Model response timed out."
-    except requests.exceptions.ConnectionError:
-        print("Kaia: Could not connect to the Ollama server. Is it running?")
-        return "ERROR: Ollama server not reachable."
-    except requests.exceptions.RequestException as e:
-        print(f"Kaia: An error occurred communicating with Ollama: {e}")
-        return "ERROR: Ollama communication error."
-    except KeyError:
-        print("Kaia: Error: Unexpected response format from Ollama. The model might not have generated a 'message' or 'content'.")
-        return "ERROR: Unexpected model response format."
-
-# --- Command Confirmation and Execution Function ---
-def confirm_and_execute_command(command):
-
-    if not command or command.lower().startswith("error:"):
-        print(f"\nKaia: I could not generate a valid command for that request, or it was deemed too dangerous.")
-        if command:
-            print(f"       Reason: {command.replace('ERROR: ', '')}")
-        return
-
-    print("\nKaia: I propose to execute the following command:")
-    print(f"--------------------------------------------------")
-    print(f"  {command}")
-    print(f"--------------------------------------------------")
-
-    # Safety confirmation
-    confirm = input("Kaia: Do you want me to execute this command? (y/N) ").strip().lower()
-
-    if confirm == 'y':
-
-        print("\nKaia: Executing command...")
         try:
-            result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True, env=os.environ)
-            print("--- Command Output ---")
-            print(result.stdout)
-            if result.stderr:
-                print("--- Command Error Output ---")
-                print(result.stderr)
-            print("--- Command Finished ---")
-        except subprocess.CalledProcessError as e:
-            print(f"Kaia: Error during command execution. Exit code: {e.returncode}")
-            print(f"STDOUT: {e.stdout}")
-            print(f"STDERR: {e.stderr}")
-        except FileNotFoundError:
-            print("Kaia: Error: Command not found. Is it in your PATH?")
+            response = requests.post(
+                OLLAMA_API_URL,
+                json=payload,
+                timeout=TIMEOUT_SECONDS
+            )
+            response.raise_for_status()
+
+            command = response.json()['message']['content'].strip()
+
+            # Clean any markdown formatting
+            if command.startswith("```"):
+                command = command.split('\n', 1)[1]
+            if command.endswith("```"):
+                command = command[:-3]
+            command = command.strip()
+
+            if any(pattern in command for pattern in DANGEROUS_PATTERNS):
+                return None, "Command contains dangerous patterns"
+
+            self.last_command = command
+            return command, None
+
+        except requests.exceptions.Timeout:
+            return None, "Command generation timed out"
+        except requests.exceptions.ConnectionError:
+            return None, "Could not connect to Ollama server"
+        except requests.exceptions.RequestException as e:
+            return None, f"Ollama communication error: {str(e)}"
+        except (KeyError, ValueError) as e:
+            return None, f"Unexpected response format: {str(e)}"
+
+    def execute_command(self, command: str) -> Tuple[bool, str, str]:
+        """
+        Execute a shell command with safety checks.
+
+        Args:
+            command: The command to execute
+
+        Returns:
+            tuple: (success: bool, stdout: str, stderr: str)
+        """
+        if not command:
+            return False, "", "No command provided"
+
+        if any(pattern in command for pattern in DANGEROUS_PATTERNS):
+            return False, "", "Command contains dangerous patterns"
+
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                check=False,  # We'll handle errors ourselves
+                capture_output=True,
+                text=True,
+                env=os.environ
+            )
+
+            self.last_output = (result.stdout, result.stderr)
+            return (
+                result.returncode == 0,
+                result.stdout,
+                result.stderr
+            )
+
         except Exception as e:
-            print(f"Kaia: An unexpected error occurred: {e}")
-    else:
-        print("Kaia: Command execution cancelled.")
+            return False, "", f"Execution error: {str(e)}"
 
-# --- Main Interaction Loop --- #
-def main():
-    print("Welcome to Kaia's Command Execution Interface!")
-    print(f"I will use the '{DEFAULT_COMMAND_MODEL}' model to generate commands.")
-    print("Type your request. Type 'exit' to quit.")
+def get_command_for_query(query: str) -> Tuple[Optional[str], Optional[str]]:
+    """Convenience function for quick command generation."""
+    cli = KaiaCLI()
+    return cli.generate_command(query)
 
-    while True:
-        user_input = input("\nKaia: How may I assist with command generation? ").strip()
+def execute_user_command(command: str) -> Tuple[bool, str, str]:
+    """Convenience function for quick command execution."""
+    cli = KaiaCLI()
+    return cli.execute_command(command)
 
-        if user_input.lower() == 'exit':
-            print("Kaia: Farewell. May your binaries be swift and your logs concise.")
-            break
-
-        if not user_input:
-            continue
-
-        generated_command = ask_ollama_for_command(user_input)
-        if generated_command:
-            confirm_and_execute_command(generated_command)
-
+# For backward compatibility with existing imports
 if __name__ == "__main__":
-    main()
+    print("This module is meant to be imported, not run directly.")
+    print("Use the provided functions or the KaiaCLI class.")
