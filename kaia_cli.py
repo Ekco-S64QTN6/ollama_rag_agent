@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Kaia CLI Module - Provides secure command generation and execution for the main Kaia interface.
-"""
-
 import requests
 import subprocess
 import os

@@ -1,2 +1,4 @@
 /storage/
 /data/books/
+*.log
+__pycache__/

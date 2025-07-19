@@ -22,6 +22,7 @@ from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from sqlalchemy import create_engine
 from kaia_cli import KaiaCLI
+from contextlib import redirect_stdout # <-- Import this
 
 # --- Config ---
 LLM_MODEL = "mistral:instruct"
@@ -51,8 +52,12 @@ KAIA_SYSTEM_PROMPT = """
 
 # --- Logging ---
 logging.basicConfig(stream=sys.stdout, level=logging.ERROR)
-for noisy in ["httpx", "httpcore", "llama_index", "chromadb", "fsspec", "urllib3"]:
+for noisy in ["httpx", "httpcore", "fsspec", "urllib3"]:
     logging.getLogger(noisy).setLevel(logging.CRITICAL)
+logging.getLogger("llama_index").setLevel(logging.CRITICAL)
+logging.getLogger("llama_index.core.storage.kvstore").setLevel(logging.CRITICAL)
+logging.getLogger("chromadb").setLevel(logging.CRITICAL)
+
 
 # --- Initialize Models ---
 session = requests.Session()
@@ -110,11 +115,14 @@ if not os.path.exists(LLAMA_INDEX_METADATA_PATH):
     print(f"{COLOR_GREEN}Index built and saved.{COLOR_RESET}")
 else:
     print(f"{COLOR_BLUE}Loading index...{COLOR_RESET}")
-    storage_context = StorageContext.from_defaults(
-        vector_store=vector_store,
-        persist_dir=LLAMA_INDEX_METADATA_PATH
-    )
-    index = load_index_from_storage(storage_context=storage_context)
+    # Temporarily redirect stdout to suppress noisy LlamaIndex messages
+    with open(os.devnull, 'w') as fnull:
+        with redirect_stdout(fnull):
+            storage_context = StorageContext.from_defaults(
+                vector_store=vector_store,
+                persist_dir=LLAMA_INDEX_METADATA_PATH
+            )
+            index = load_index_from_storage(storage_context=storage_context)
     print(f"{COLOR_GREEN}Index loaded.{COLOR_RESET}")
 
 # --- Chat Engine ---
@@ -145,12 +153,13 @@ try:
         llm=Settings.llm,
         tables=["facts", "interaction_history", "user_preferences", "tools", "kaia_persona_details"]
     )
-    print(f"{COLOR_GREEN}SQL Database initialized.{COLOR_RESET}")
+    print(f"{COLOR_GREEN}PostgreSQL initialized successfully.{COLOR_RESET}") # Updated message here
     database_utils.insert_default_persona_details()
 except Exception as e:
-    logging.error(f"{COLOR_RED}Failed to initialize SQL Database: {e}{COLOR_RESET}")
+    logging.error(f"{COLOR_RED}Failed to initialize PostgreSQL Database: {e}{COLOR_RESET}")
     sys.exit(1)
 
+# ... (162) ...
 # --- Helper Functions ---
 def speak_text_async(text):
     if not TTS_ENABLED:

@@ -2,8 +2,10 @@ import logging
 from typing import Optional, List, Dict, Union
 from sqlalchemy import create_engine, Column, Integer, Text, Boolean, DateTime, MetaData, Table, func
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.dialects import postgresql # Import postgresql dialects for specific clauses
 from sqlalchemy.exc import IntegrityError, OperationalError
 from datetime import datetime
+import sqlalchemy # Import for get_database_status to work with inspector
 
 # --- Database Initialization ---
 engine = None
@@ -18,7 +20,7 @@ user_preferences_table = Table(
     Column('preference_key', Text, nullable=False),
     Column('preference_value', Text),
     Column('last_updated', DateTime(timezone=True), default=func.now()),
-    sqlite_autoincrement=True
+    # Removed sqlite_autoincrement=True
 )
 
 facts_table = Table(
@@ -28,7 +30,7 @@ facts_table = Table(
     Column('source', Text, default='user_input'),
     Column('context', Text, default='general'),
     Column('timestamp', DateTime(timezone=True), default=func.now()),
-    sqlite_autoincrement=True
+    # Removed sqlite_autoincrement=True
 )
 
 interaction_history_table = Table(
@@ -38,7 +40,7 @@ interaction_history_table = Table(
     Column('user_query', Text, nullable=False),
     Column('kaia_response', Text, nullable=False),
     Column('response_type', Text, default='chat'),
-    sqlite_autoincrement=True
+    # Removed sqlite_autoincrement=True
 )
 
 tools_table = Table(
@@ -49,7 +51,7 @@ tools_table = Table(
     Column('tool_function_name', Text),
     Column('is_enabled', Boolean, default=True),
     Column('last_modified', DateTime(timezone=True), default=func.now()),
-    sqlite_autoincrement=True
+    # Removed sqlite_autoincrement=True
 )
 
 kaia_persona_details_table = Table(
@@ -58,7 +60,7 @@ kaia_persona_details_table = Table(
     Column('detail_key', Text, nullable=False, unique=True),
     Column('detail_value', Text, nullable=False),
     Column('last_updated', DateTime(timezone=True), default=func.now()),
-    sqlite_autoincrement=True
+    # Removed sqlite_autoincrement=True
 )
 
 def initialize_db(database_url: str) -> bool:
@@ -73,15 +75,18 @@ def initialize_db(database_url: str) -> bool:
     global engine, Session
     try:
         engine = create_engine(database_url)
+        # Verify connection by attempting to connect
+        with engine.connect() as connection:
+            connection.execute(func.now())
         Session = sessionmaker(bind=engine)
         metadata.create_all(engine)  # Create tables if they don't exist
-        logging.info(f"Database initialized successfully for {database_url}")
+        logging.info(f"PostgreSQL database initialized successfully for {database_url}")
         return True
     except OperationalError as e:
-        logging.error(f"Database connection failed: {e}")
+        logging.error(f"PostgreSQL database connection failed: {e}")
         return False
     except Exception as e:
-        logging.error(f"Unexpected error during initialization: {e}")
+        logging.error(f"Unexpected error during PostgreSQL initialization: {e}")
         return False
 
 def get_session():
@@ -107,11 +112,14 @@ def insert_default_persona_details() -> bool:
     session = get_session()
     try:
         for detail in default_details:
-            # Using insert().on_conflict_do_nothing() for PostgreSQL
-            # For SQLite, we'd need a different approach
-            stmt = kaia_persona_details_table.insert().values(**detail)
-            session.execute(stmt)
+            # Use PostgreSQL's ON CONFLICT DO NOTHING for upsert
+            insert_stmt = postgresql.insert(kaia_persona_details_table).values(**detail)
+            on_conflict_stmt = insert_stmt.on_conflict_do_nothing(
+                index_elements=['detail_key']
+            )
+            session.execute(on_conflict_stmt)
         session.commit()
+        logging.info("Default persona details inserted/skipped.")
         return True
     except Exception as e:
         session.rollback()
@@ -150,7 +158,7 @@ def store_fact(fact_text: str, source: str = "user_input", context: str = None) 
         ).returning(facts_table.c.fact_id)
         result = session.execute(stmt)
         session.commit()
-        return result.scalar()
+        return result.scalar_one_or_none() # Use scalar_one_or_none for consistent behavior
     except Exception as e:
         session.rollback()
         logging.error(f"Failed to store fact: {e}")
@@ -162,29 +170,18 @@ def set_user_preference(user_id: str, preference_key: str, preference_value: str
     """Set or update a user preference."""
     session = get_session()
     try:
-        # Upsert operation
-        stmt = user_preferences_table.insert().values(
+        # Use PostgreSQL's ON CONFLICT (UPSERT)
+        insert_stmt = postgresql.insert(user_preferences_table).values(
             user_id=user_id,
             preference_key=preference_key,
             preference_value=preference_value
         )
-
-        # For PostgreSQL we'd use on_conflict_do_update
-        # For SQLite we need to handle separately
-        try:
-            session.execute(stmt)
-        except IntegrityError:
-            # Update existing
-            upd = user_preferences_table.update().where(
-                user_preferences_table.c.user_id == user_id
-            ).where(
-                user_preferences_table.c.preference_key == preference_key
-            ).values(
-                preference_value=preference_value,
-                last_updated=func.now()
-            )
-            session.execute(upd)
-
+        on_conflict_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=['user_id', 'preference_key'],
+            set_={'preference_value': insert_stmt.excluded.preference_value,
+                  'last_updated': func.now()}
+        )
+        session.execute(on_conflict_stmt)
         session.commit()
         return True
     except Exception as e:
@@ -216,7 +213,7 @@ def get_all_facts() -> List[Dict]:
     session = get_session()
     try:
         stmt = facts_table.select().order_by(facts_table.c.timestamp.desc())
-        return [dict(row) for row in session.execute(stmt).fetchall()]
+        return [dict(row._mapping) for row in session.execute(stmt).fetchall()] # Use _mapping for dict conversion
     except Exception as e:
         logging.error(f"Failed to get facts: {e}")
         return []
@@ -246,7 +243,7 @@ def get_all_user_preferences(user_id: str) -> List[Dict]:
         stmt = user_preferences_table.select().where(
             user_preferences_table.c.user_id == user_id
         ).order_by(user_preferences_table.c.preference_key)
-        return [dict(row) for row in session.execute(stmt).fetchall()]
+        return [dict(row._mapping) for row in session.execute(stmt).fetchall()] # Use _mapping for dict conversion
     except Exception as e:
         logging.error(f"Failed to get preferences: {e}")
         return []
@@ -272,13 +269,19 @@ def handle_memory_storage(query: str) -> bool:
         fact_text = query.split("remember that", 1)[1].strip()
         if fact_text:
             store_fact(fact_text)
+            logging.info(f"Fact stored: {fact_text}")
             return True
+        else:
+            logging.warning("Attempted to store an empty fact.")
+            return False
+
 
     # Handle preference patterns
     preference_patterns = {
         "favorite color is": "favorite_color",
         "default editor is": "default_editor",
-        "preferred output method is": "output_method"
+        "preferred output method is": "output_method",
+        "my pet's name is": "pet_name" # Added from persona details
     }
 
     for phrase, key in preference_patterns.items():
@@ -286,9 +289,14 @@ def handle_memory_storage(query: str) -> bool:
             value = query.split(phrase, 1)[1].strip()
             if value:
                 set_user_preference(user_id, key, value)
+                logging.info(f"Preference set: {key} = {value}")
                 return True
+            else:
+                logging.warning(f"Attempted to set empty value for preference: {key}")
+                return False
 
     return False
+
 
 def handle_data_retrieval(query: str) -> Dict[str, Union[str, List[Dict]]]:
     """Handle data retrieval requests.
@@ -307,12 +315,20 @@ def handle_data_retrieval(query: str) -> Dict[str, Union[str, List[Dict]]]:
     user_id = "default_user"
 
     # Check for specific retrieval patterns
-    if "all facts" in query_lower or "what facts" in query_lower:
+    if "all facts" in query_lower or "what facts" in query_lower or "list all facts" in query_lower:
         facts = get_all_facts()
         if facts:
+            # Format facts for display
+            formatted_facts = []
+            for fact in facts:
+                fact_id = fact.get('fact_id', 'N/A')
+                fact_text = fact.get('fact_text', 'No text')
+                source = fact.get('source', 'Unknown source')
+                timestamp = fact.get('timestamp', 'Unknown time').strftime("%Y-%m-%d %H:%M:%S") if isinstance(fact.get('timestamp'), datetime) else 'Unknown time'
+                formatted_facts.append(f"ID: {fact_id}, Fact: \"{fact_text}\", Source: {source}, Time: {timestamp}")
             return {
                 'message': "Here are the stored facts:",
-                'data': facts,
+                'data': formatted_facts, # Return formatted strings in data
                 'response_type': "facts_retrieved"
             }
         return {
@@ -321,12 +337,17 @@ def handle_data_retrieval(query: str) -> Dict[str, Union[str, List[Dict]]]:
             'response_type': "facts_retrieved"
         }
 
-    if "preferences" in query_lower:
+    if "preferences" in query_lower or "my preferences" in query_lower or "user preferences" in query_lower:
         prefs = get_all_user_preferences(user_id)
         if prefs:
+            formatted_prefs = []
+            for pref in prefs:
+                key = pref.get('preference_key', 'N/A')
+                value = pref.get('preference_value', 'No value')
+                formatted_prefs.append(f"{key.replace('_', ' ').title()}: {value}")
             return {
                 'message': "Here are your stored preferences:",
-                'data': prefs,
+                'data': formatted_prefs, # Return formatted strings in data
                 'response_type': "preferences_retrieved"
             }
         return {
@@ -335,26 +356,59 @@ def handle_data_retrieval(query: str) -> Dict[str, Union[str, List[Dict]]]:
             'response_type': "preferences_retrieved"
         }
 
-    # Check for specific preferences
-    specific_prefs = {
-        "favorite color": "favorite_color",
-        "default editor": "default_editor"
+    # Check for specific persona details
+    # The persona details are now stored in the kaia_persona_details_table
+    # The existing persona_detail action in llamaindex_ollama_rag.py should handle this,
+    # but for handle_data_retrieval specifically, we can also check.
+    persona_detail_keywords = {
+        "my pet's name": "pet_name",
+        "favorite music genre": "favorite_music_genre",
+        "core philosophy": "core_philosophy",
+        "sarcasm level": "sarcasm_level",
+        "favorite operating system": "favorite_operating_system",
+        "cpu type": "cpu_type",
+        "motherboard model": "motherboard_model",
+        "my persona details": "all_persona_details" # A new keyword to retrieve all
     }
 
-    for display_name, key in specific_prefs.items():
-        if display_name in query_lower:
-            value = get_user_preference(user_id, key)
-            if value:
+    for phrase, key in persona_detail_keywords.items():
+        if phrase in query_lower:
+            if key == "all_persona_details":
+                session = get_session()
+                try:
+                    stmt = kaia_persona_details_table.select().order_by(kaia_persona_details_table.c.detail_key)
+                    all_details = [dict(row._mapping) for row in session.execute(stmt).fetchall()]
+                    if all_details:
+                        formatted_details = []
+                        for detail in all_details:
+                            formatted_details.append(f"{detail['detail_key'].replace('_', ' ').title()}: {detail['detail_value']}")
+                        return {
+                            'message': "Here are my persona details:",
+                            'data': formatted_details,
+                            'response_type': "persona_details_retrieved"
+                        }
+                    else:
+                        return {
+                            'message': "No persona details are currently stored.",
+                            'data': [],
+                            'response_type': "persona_details_retrieved"
+                        }
+                finally:
+                    session.close()
+            else:
+                value = get_persona_detail(key)
+                if value:
+                    return {
+                        'message': f"My {phrase} is {value}.",
+                        'data': [{'key': key, 'value': value}],
+                        'response_type': "persona_detail_retrieved"
+                    }
                 return {
-                    'message': f"Your {display_name} is {value}.",
-                    'data': [{'key': key, 'value': value}],
-                    'response_type': "preference_retrieved"
+                    'message': f"I don't have information about my {phrase} stored.",
+                    'data': [],
+                    'response_type': "persona_detail_not_found"
                 }
-            return {
-                'message': f"I don't have your {display_name} stored.",
-                'data': [],
-                'response_type': "preference_not_found"
-            }
+
 
     # Default response if no patterns matched
     return {
@@ -367,7 +421,25 @@ def handle_data_retrieval(query: str) -> Dict[str, Union[str, List[Dict]]]:
 
 def get_database_status() -> Dict:
     """Get database status information."""
-    return {
-        'connected': bool(engine),
-        'tables': [table.name for table in metadata.sorted_tables]
-    }
+    if not engine:
+        return {
+            'connected': False,
+            'tables': []
+        }
+    session = get_session()
+    try:
+        inspector = sqlalchemy.inspect(engine)
+        tables = inspector.get_table_names()
+        return {
+            'connected': True,
+            'tables': tables
+        }
+    except Exception as e:
+        logging.error(f"Error getting database status: {e}")
+        return {
+            'connected': False,
+            'tables': [],
+            'error': str(e)
+        }
+    finally:
+        session.close()
