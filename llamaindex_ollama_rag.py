@@ -22,7 +22,7 @@ from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from sqlalchemy import create_engine
 from kaia_cli import KaiaCLI
-from contextlib import redirect_stdout # <-- Import this
+from contextlib import redirect_stdout
 
 # --- Config ---
 LLM_MODEL = "mistral:instruct"
@@ -36,7 +36,6 @@ PERSIST_DIR = "./storage"
 CHROMA_DB_PATH = "./storage/chroma_db"
 LLAMA_INDEX_METADATA_PATH = "./storage/llama_index_metadata"
 TTS_ENABLED = False
-SQL_DATABASE_PATH = "./storage/kaia_database.db"
 
 # --- ANSI Color Codes ---
 COLOR_GREEN = "\033[92m"
@@ -57,7 +56,6 @@ for noisy in ["httpx", "httpcore", "fsspec", "urllib3"]:
 logging.getLogger("llama_index").setLevel(logging.CRITICAL)
 logging.getLogger("llama_index.core.storage.kvstore").setLevel(logging.CRITICAL)
 logging.getLogger("chromadb").setLevel(logging.CRITICAL)
-
 
 # --- Initialize Models ---
 session = requests.Session()
@@ -140,10 +138,8 @@ def get_chat_engine():
 chat_engine = get_chat_engine()
 
 # --- SQL Database ---
-DB_CONNECTION_STRING = "postgresql://kaiauser@localhost/kaiadb"
-
 try:
-    if not database_utils.initialize_db(DB_CONNECTION_STRING):
+    if not database_utils.initialize_db():
         logging.error("Failed to initialize database.")
         sys.exit(1)
 
@@ -151,15 +147,13 @@ try:
     sql_query_engine = NLSQLTableQueryEngine(
         sql_database=sql_database,
         llm=Settings.llm,
-        tables=["facts", "interaction_history", "user_preferences", "tools", "kaia_persona_details"]
+        tables=["facts", "interaction_history", "user_preferences", "tools"]
     )
-    print(f"{COLOR_GREEN}PostgreSQL initialized successfully.{COLOR_RESET}") # Updated message here
-    database_utils.insert_default_persona_details()
+    print(f"{COLOR_GREEN}PostgreSQL initialized successfully.{COLOR_RESET}")
 except Exception as e:
     logging.error(f"{COLOR_RED}Failed to initialize PostgreSQL Database: {e}{COLOR_RESET}")
     sys.exit(1)
 
-# ... (162) ...
 # --- Helper Functions ---
 def speak_text_async(text):
     if not TTS_ENABLED:
@@ -213,13 +207,16 @@ def confirm_and_execute_command(command):
 def generate_action_plan(user_input):
     system_prompt = """You are an AI assistant that classifies user intents. Respond ONLY with valid JSON:
     {
-        "action": "command"|"chat"|"sql"|"persona_detail"|"retrieve_data",
+        "action": "command"|"chat"|"sql"|"retrieve_data"|"store_data",
         "content": "appropriate content for the action"
     }
 
-    Special cases:
-    - For file/directory operations (list, find, search), use "command" action
-    - For system information requests, use "command" action"""
+    Categories:
+    - "command": Terminal commands, file operations, system info
+    - "chat": General conversation, knowledge questions
+    - "sql": Database queries requiring SQL joins/aggregations
+    - "retrieve_data": Recall personal facts/preferences ("What's my favorite color?")
+    - "store_data": Remember personal facts/preferences ("I like blue")"""
 
     payload = {
         "model": DEFAULT_COMMAND_MODEL,
@@ -271,12 +268,11 @@ while True:
             elif cmd == 'status':
                 msg = f"{get_dynamic_system_status_with_gpu()}\n\nDatabase: {'Connected' if database_utils.engine else 'Disconnected'}"
                 if database_utils.engine:
-                    try:
-                        with database_utils.engine.connect() as conn:
-                            tables = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='public'").fetchall()
-                            msg += f"\nTables: {', '.join(t[0] for t in tables)}"
-                    except Exception as e:
-                        msg += f"\nDatabase Info: Error checking ({str(e)})"
+                    db_status = database_utils.get_database_status()
+                    if db_status['connected']:
+                        msg += f"\nTables: {', '.join(db_status['tables'])}"
+                    else:
+                        msg += f"\nDatabase Info: Error checking ({db_status.get('error', 'Unknown error')})"
             else:
                 msg = f"Unknown command: /{cmd}"
             print(f"{COLOR_BLUE}{msg}{COLOR_RESET}")
@@ -284,14 +280,21 @@ while True:
                 speak_text_async(msg.replace("\n", " "))
             continue
 
-        # Handle memory/preference storage
-        if database_utils.handle_memory_storage(query):
-            continue
-
         # Generate and execute action plan
         plan = generate_action_plan(query)
         action = plan.get("action", "chat")
         content = plan.get("content", query)
+
+        # Handle data storage requests
+        if action == "store_data":
+            # Ensure content is a string before passing to handle_memory_storage
+            if isinstance(content, list):
+                content = ' '.join(content)
+            storage_handled, storage_response = database_utils.handle_memory_storage(content)
+            print(f"\n{COLOR_BLUE}Kaia:{COLOR_RESET} {storage_response}")
+            if TTS_ENABLED:
+                speak_text_async(storage_response)
+            continue
 
         if action == "command":
             try:
@@ -421,21 +424,10 @@ while True:
             except Exception as e:
                 print(f"{COLOR_RED}Database Error: {e}{COLOR_RESET}")
 
-        elif action == "persona_detail":
-            detail_value = database_utils.get_persona_detail(content)
-            if detail_value:
-                print(f"\n{COLOR_BLUE}Kaia:{COLOR_RESET} {detail_value}")
-                if TTS_ENABLED:
-                    speak_text_async(detail_value)
-                database_utils.log_interaction(content, detail_value, "persona_detail")
-            else:
-                msg = f"I don't have information about '{content}' in my persona details"
-                print(f"\n{COLOR_BLUE}Kaia:{COLOR_RESET} {msg}")
-                if TTS_ENABLED:
-                    speak_text_async(msg)
-                database_utils.log_interaction(content, msg, "persona_detail")
-
         elif action == "retrieve_data":
+            # CRITICAL FIX: Ensure content is a string before passing to handle_data_retrieval
+            if isinstance(content, list):
+                content = ' '.join(content)
             result = database_utils.handle_data_retrieval(content)
             print(f"\n{COLOR_BLUE}Kaia:{COLOR_RESET}")
             if isinstance(result['data'], list) and result['data']:
