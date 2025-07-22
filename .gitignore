@@ -2,3 +2,4 @@
 /data/books/
 *.log
 __pycache__/
+.env

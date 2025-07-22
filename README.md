@@ -10,6 +10,7 @@ Kaia is an advanced local AI assistant combining:
 - **Intelligent Command Execution:** Understands natural language requests to propose and execute Linux shell commands
 - **Text-to-Speech (Optional):** Provides spoken responses via Piper/speech-dispatcher
 - **Long-Term Memory:** Stores user preferences, facts, and interaction history in PostgreSQL
+- **Enhanced System Monitoring:** Provides real-time system diagnostics.
 
 ## Key Features
 
@@ -20,7 +21,7 @@ Kaia is an advanced local AI assistant combining:
 - Real-time system monitoring (`/status` command)
 - Streaming responses with first-token latency metrics
 - Persistent memory for user preferences and facts
-- Unified data retrieval for persona details, facts, and preferences
+- Unified data retrieval for persona details, facts, and preferences, and interaction history.
 
 ### Technical Highlights
 - Persistent ChromaDB vector storage
@@ -29,6 +30,7 @@ Kaia is an advanced local AI assistant combining:
 - Configurable TTS backend (Piper recommended)
 - GPU awareness (NVIDIA monitoring)
 - Pre-warmed LLM for reduced cold-start latency
+- Robust natural language processing for data retrieval.
 
 ## Installation
 
@@ -55,7 +57,6 @@ pip install -r requirements.txt
 ### Prepare knowledge bases
 ```bash
 mkdir -p data personal_context storage
-echo "Place your Markdown knowledge files here" > data/README.md
 ```
 
 ## Configuration
