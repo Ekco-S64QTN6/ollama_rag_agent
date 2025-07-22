@@ -2,311 +2,245 @@ import platform
 import psutil
 import subprocess
 import json
-from datetime import datetime, timedelta
 import logging
 import os
+import requests
+from datetime import datetime
 from typing import Dict, List, Union, Any, Optional, Tuple
-
-# --- Constants ---
-DEFAULT_COMMAND_MODEL = "mixtral:8x7b-instruct-v0.1-q4_K_M"
 
 # --- Logging ---
 logger = logging.getLogger(__name__)
 
 class KaiaCLI:
     """
-    Provides command-line interface functionalities for Kaia,
-    including system status retrieval and command generation/execution.
+    Provides command-line interface functionalities for Kaia.
+    This class is responsible for two main tasks:
+    1.  Generating and executing Linux shell commands based on natural language.
+    2.  Retrieving detailed system status information.
+    It acts as a service layer, abstracting the underlying system calls and API interactions
+    from the main application logic in `llamaindex_ollama_rag.py`.
     """
 
     def __init__(self):
         """Initializes the KaiaCLI."""
+        # The __init__ method is kept simple as this class is stateless.
         pass
 
     def get_system_status(self) -> Dict[str, Any]:
         """
-        Retrieves comprehensive system status information.
+        Retrieves a comprehensive snapshot of the system's current status.
+        This method aggregates data from multiple helper functions.
 
         Returns:
-            Dict[str, Any]: A dictionary containing various system metrics.
+            A dictionary containing structured system metrics.
         """
         status = {
             'timestamp': datetime.now().isoformat(),
             'os_info': self._get_os_info(),
             'kernel_info': self._get_kernel_info(),
-            'python_version': platform.python_version(),
+            'uptime': self._get_uptime(),
+            'board_info': self._get_board_info(),
             'cpu_info': self._get_cpu_info_detailed(),
             'memory_info': self._get_memory_info(),
-            'all_disk_usage': self._get_all_disk_usage(),
+            'disk_usage': self._get_all_disk_usage(),
             'gpu_info': self._get_gpu_details(),
-            'vulkan_info': self._get_vulkan_info(), # New: Vulkan information
-            'opencl_info': self._get_opencl_info(), # New: OpenCL information
-            'uptime': self._get_uptime(), # New: Uptime information
-            'board_info': self._get_board_info(), # New: Board information
+            'python_version': platform.python_version(),
             'ollama_status': self._check_ollama_status(),
         }
         return status
 
     def _get_os_info(self) -> str:
-        """Retrieves formatted OS information."""
-        # Based on user's provided info: "OS: Arch Linux x86_64"
-        return f"Arch Linux {platform.machine()}"
+        """Retrieves OS information dynamically."""
+        try:
+            # Use freedesktop standard for better compatibility across Linux distros
+            release_info = psutil.os.uname()
+            return f"{release_info.sysname} {release_info.release} ({release_info.machine})"
+        except Exception:
+             # Fallback for other systems
+            return f"{platform.system()} {platform.release()}"
 
     def _get_kernel_info(self) -> str:
-        """Retrieves formatted Kernel information."""
-        # Based on user's provided info: "Kernel: Linux 6.15.7-arch1-1"
-        return f"Linux {platform.release()}"
+        """Retrieves the kernel version."""
+        return platform.release()
 
     def _get_uptime(self) -> str:
-        """
-        Calculates and returns system uptime in a human-readable format.
-        """
-        boot_time_timestamp = psutil.boot_time()
-        boot_datetime = datetime.fromtimestamp(boot_time_timestamp)
-        current_datetime = datetime.now()
-        uptime_delta = current_datetime - boot_datetime
+        """Calculates and returns system uptime in a human-readable format."""
+        try:
+            boot_time_timestamp = psutil.boot_time()
+            uptime_seconds = datetime.now().timestamp() - boot_time_timestamp
+            days, remainder = divmod(uptime_seconds, 86400)
+            hours, remainder = divmod(remainder, 3600)
+            minutes, _ = divmod(remainder, 60)
 
-        days = uptime_delta.days
-        hours, remainder = divmod(uptime_delta.seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
+            parts = []
+            if days > 0:
+                parts.append(f"{int(days)} day{'s' if days != 1 else ''}")
+            if hours > 0:
+                parts.append(f"{int(hours)} hr{'s' if hours != 1 else ''}")
+            if minutes > 0:
+                parts.append(f"{int(minutes)} min{'s' if minutes != 1 else ''}")
 
-        uptime_parts = []
-        if days > 0:
-            uptime_parts.append(f"{days} day{'s' if days != 1 else ''}")
-        if hours > 0:
-            uptime_parts.append(f"{hours} hr{'s' if hours != 1 else ''}")
-        if minutes > 0:
-            uptime_parts.append(f"{minutes} min{'s' if minutes != 1 else ''}")
-
-        if not uptime_parts: # Less than a minute
-            return "Less than a minute"
-
-        return ", ".join(uptime_parts)
+            return ", ".join(parts) if parts else "Less than a minute"
+        except Exception as e:
+            logger.warning(f"Could not determine uptime: {e}")
+            return "N/A"
 
     def _get_board_info(self) -> str:
         """
         Retrieves motherboard/board information.
+        NOTE: This is difficult to retrieve reliably across all systems programmatically.
+        A hardcoded value is used as a practical fallback. For dynamic retrieval,
+        one might parse `dmidecode -t baseboard`, which requires root privileges.
         """
-        # Based on user's provided info: "Board: ROG STRIX B650-A GAMING WIFI (Rev 1.xx)"
         return "ROG STRIX B650-A GAMING WIFI (Rev 1.xx)"
 
-
     def _get_memory_info(self) -> Dict[str, Union[int, float]]:
-        """
-        Retrieves system memory information.
-
-        Returns:
-            Dict[str, Union[int, float]]: Dictionary with total, available, used memory in bytes and percentage.
-        """
+        """Retrieves system memory information."""
         mem = psutil.virtual_memory()
         return {
-            'total': mem.total,
-            'available': mem.available,
-            'percent': mem.percent,
-            'used': mem.used
+            'total_gb': round(mem.total / (1024**3), 2),
+            'available_gb': round(mem.available / (1024**3), 2),
+            'percent_used': mem.percent,
         }
 
-    def _get_cpu_info_detailed(self) -> Dict[str, Union[float, int, str]]:
-        """
-        Retrieves detailed CPU information including name and clock speed.
-
-        Returns:
-            Dict[str, Union[float, int, str]]: Dictionary with CPU percentage, core count, name, and speed.
-        """
+    def _get_cpu_info_detailed(self) -> Dict[str, Any]:
+        """Retrieves detailed CPU information."""
         cpu_name = "N/A"
-        cpu_speed = "N/A"
         try:
-            # Attempt to get CPU name and speed from /proc/cpuinfo
+            # Standard method for getting CPU model on Linux
             with open('/proc/cpuinfo', 'r') as f:
                 for line in f:
                     if "model name" in line:
                         cpu_name = line.split(':')[-1].strip()
-                    if "cpu MHz" in line:
-                        mhz = float(line.split(':')[-1].strip())
-                        cpu_speed = f"{mhz / 1000:.2f} GHz" if mhz >= 1000 else f"{mhz:.0f} MHz"
-                    if cpu_name != "N/A" and cpu_speed != "N/A":
-                        break # Found both, no need to read further
+                        break
         except Exception as e:
             logger.warning(f"Could not read CPU info from /proc/cpuinfo: {e}")
 
         return {
             'name': cpu_name,
-            'speed': cpu_speed,
-            'percent': psutil.cpu_percent(interval=1),
-            'cores': psutil.cpu_count(logical=False),
-            'logical_cores': psutil.cpu_count(logical=True)
+            'percent_usage': psutil.cpu_percent(interval=1),
+            'physical_cores': psutil.cpu_count(logical=False),
+            'logical_cores': psutil.cpu_count(logical=True),
         }
 
     def _get_all_disk_usage(self) -> List[Dict[str, Any]]:
-        """
-        Retrieves disk usage information for specified partitions/mount points.
-
-        Returns:
-            List[Dict[str, Any]]: A list of dictionaries, each containing disk usage
-                                  details for a specific mount point.
-        """
-        # Define the mount points and their desired labels based on user's request.
-        # These paths are hardcoded based on your previous output.
-        # If your system's mount points change, this list will need adjustment.
-        disk_mounts = [
-            {'path': '/', 'label': '/'},
-            {'path': '/boot', 'label': '/boot'},
-            {'path': '/home', 'label': '/home'},
-            {'path': '/run/media/ekco/KingSpec1', 'label': 'KingSpec1'},
-            {'path': '/run/media/ekco/KingSpec2', 'label': 'KingSpec2'},
-            {'path': '/run/media/ekco/D02B-11D2', 'label': 'Removable'} # USB stick
-        ]
-
-        all_disk_info = []
-        for disk_mount in disk_mounts:
-            path = disk_mount['path']
-            label = disk_mount['label']
+        """Retrieves disk usage for all physical partitions."""
+        partitions = psutil.disk_partitions()
+        disk_info = []
+        for p in partitions:
             try:
-                usage = psutil.disk_usage(path)
-                all_disk_info.append({
-                    'mount_point': path,
-                    'label': label,
-                    'total': usage.total,
-                    'used': usage.used,
-                    'free': usage.free,
-                    'percent': usage.percent
+                usage = psutil.disk_usage(p.mountpoint)
+                disk_info.append({
+                    'mount_point': p.mountpoint,
+                    'total_gb': round(usage.total / (1024**3), 2),
+                    'used_gb': round(usage.used / (1024**3), 2),
+                    'percent_used': usage.percent,
                 })
             except Exception as e:
-                logger.warning(f"Could not get disk usage for {path} ({label}): {e}")
-                all_disk_info.append({
-                    'mount_point': path,
-                    'label': label,
-                    'status': 'Error',
-                    'error_message': str(e)
-                })
-        return all_disk_info
+                logger.warning(f"Could not get disk usage for {p.mountpoint}: {e}")
+        return disk_info
 
     def _get_gpu_details(self) -> List[Dict[str, Any]]:
-        """
-        Retrieves GPU information, including integrated/discrete labels.
-        """
-        gpu_data = []
-
-        # Add the integrated AMD GPU as a fixed entry based on user's system info
-        gpu_data.append({
-            'name': 'AMD Radeon Graphics',
-            'type': 'Integrated',
-            'utilization_gpu_percent': 'N/A', # Cannot easily get live usage for integrated without more complex tools
-            'memory_total_mb': 'N/A',
-            'memory_used_mb': 'N/A',
-            'memory_free_mb': 'N/A'
-        })
-
-        # Attempt to get NVIDIA GPU information using nvidia-smi
+        """Retrieves GPU details, prioritizing nvidia-smi if available."""
+        gpus = []
         try:
-            cmd = ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.total,memory.used,memory.free", "--format=csv,noheader,nounits"]
+            cmd = ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.total,memory.used", "--format=csv,noheader,nounits"]
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            lines = result.stdout.strip().split('\n')
-            for line in lines:
-                parts = [p.strip() for p in line.split(',')]
-                if len(parts) == 5:
-                    gpu_data.append({
-                        'name': parts[0],
-                        'type': 'Discrete', # Assume NVIDIA GPUs found by nvidia-smi are discrete
-                        'utilization_gpu_percent': float(parts[1]),
-                        'memory_total_mb': float(parts[2]),
-                        'memory_used_mb': float(parts[3]),
-                        'memory_free_mb': float(parts[4])
-                    })
-        except FileNotFoundError:
-            logger.info("nvidia-smi not found. Skipping NVIDIA GPU info retrieval.")
-        except Exception as e:
-            logger.error(f"Error retrieving NVIDIA GPU info: {e}")
-
-        return gpu_data
-
-    def _get_vulkan_info(self) -> str:
-        """
-        Retrieves Vulkan information. Hardcoded based on user's provided output.
-        """
-        return "1.4.311 - NVIDIA [575.64.03] radv [Mesa 25.1.6-arch1.1]"
-
-    def _get_opencl_info(self) -> str:
-        """
-        Retrieves OpenCL information. Hardcoded based on user's provided output.
-        """
-        return "3.0 CUDA 12.9.90"
+            for line in result.stdout.strip().split('\n'):
+                name, util, mem_total, mem_used = [p.strip() for p in line.split(',')]
+                gpus.append({
+                    'name': name,
+                    'type': 'Discrete (NVIDIA)',
+                    'utilization_percent': float(util),
+                    'memory_total_mb': float(mem_total),
+                    'memory_used_mb': float(mem_used),
+                })
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            logger.info(f"nvidia-smi not found or failed. Skipping NVIDIA GPU info. Error: {e}")
+            # As a fallback, you could add logic here to find other GPUs (e.g., AMD)
+            # For now, we add the known integrated GPU if nvidia-smi fails.
+            gpus.append({
+                'name': 'AMD Radeon Graphics',
+                'type': 'Integrated',
+            })
+        return gpus
 
     def _check_ollama_status(self) -> str:
-        """
-        Checks if the Ollama server is running by attempting to connect to its default port.
-
-        Returns:
-            str: "Running" if Ollama is accessible, "Not Running" otherwise.
-        """
+        """Checks if the Ollama server is running and responsive."""
         try:
-            subprocess.run(["nc", "-z", "localhost", "11434"], check=True, capture_output=True, timeout=5)
+            # A more robust check that queries the API endpoint
+            response = requests.get("http://localhost:11434/api/tags", timeout=5)
+            response.raise_for_status()
             return "Running"
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
-            return "Not Running"
-        except Exception as e:
-            logger.error(f"Error checking Ollama status: {e}")
-            return "Error"
+        except (requests.exceptions.RequestException, requests.exceptions.HTTPError) as e:
+            logger.warning(f"Ollama status check failed: {e}")
+            return "Not Running or Unresponsive"
 
-    def generate_command(self, query: str) -> Tuple[str, Optional[str]]:
+    def generate_command(self, query: str, model: str) -> Tuple[str, Optional[str]]:
         """
-        Generates a Linux command based on the user's natural language query using Ollama.
+        Generates a Linux command from a natural language query using a specified Ollama model.
 
         Args:
-            query (str): The user's natural language request for a command.
+            query: The user's natural language request.
+            model: The name of the Ollama model to use for generation (e.g., "mistral:instruct").
 
         Returns:
-            Tuple[str, Optional[str]]: A tuple containing the generated command string
-                                       and an error message (if any).
+            A tuple containing the generated command and an optional error message.
         """
-        system_prompt = """You are a Linux command-line expert. Your task is to generate
-        the most appropriate Linux shell command for the given user request.
-        Respond ONLY with the raw command, no explanations, no markdown, no extra text.
-        If you cannot generate a command, respond with 'ERROR: [reason]'.
-        Examples:
-        - User: list files
-        - Assistant: ls -l
-        - User: check disk space
-        - Assistant: df -h
-        - User: create a directory named 'my_project'
-        - Assistant: mkdir my_project
+        system_prompt = """You are an expert in the Linux command line. Your sole task is to convert the user's request into the most appropriate and direct shell command.
+        - Respond ONLY with the raw command.
+        - Do NOT provide explanations, markdown formatting, or any text other than the command itself.
+        - If a command cannot be generated, respond with 'ERROR: Unable to generate command for the request.'
         """
         payload = {
-            "model": DEFAULT_COMMAND_MODEL,
+            "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
+                {"role": "user", "content": "list all files including hidden ones"},
+                {"role": "assistant", "content": "ls -la"},
+                {"role": "user", "content": "find all python files in my home directory"},
+                {"role": "assistant", "content": "find ~ -type f -name \"*.py\""},
                 {"role": "user", "content": query}
             ],
             "stream": False
         }
         try:
-            response = requests.post("http://localhost:11434/api/chat", json=payload, timeout=30)
+            response = requests.post("http://localhost:11434/api/chat", json=payload, timeout=45)
             response.raise_for_status()
             command = response.json()["message"]["content"].strip()
+
             if command.startswith("ERROR:"):
                 return "", command
+
+            # Basic sanitation to prevent command chaining vulnerabilities from LLM hallucinations
+            if any(op in command for op in ['&&', ';', '||', '`']):
+                logger.warning(f"Potentially unsafe command detected and blocked: {command}")
+                return "", "ERROR: Generated command contained unsafe operators."
+
             return command, None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to generate command via Ollama API: {e}")
+            return "", f"API Error: Failed to connect to Ollama."
         except Exception as e:
-            return "", f"Failed to generate command: {e}"
+            logger.error(f"An unexpected error occurred during command generation: {e}")
+            return "", f"Unexpected Error: {e}"
 
     def execute_command(self, command: str) -> Tuple[bool, str, str]:
         """
-        Executes a given shell command.
+        Executes a given shell command safely.
 
         Args:
-            command (str): The shell command to execute.
+            command: The shell command to execute.
 
         Returns:
-            Tuple[bool, str, str]: A tuple containing:
-                                   - bool: True if command succeeded, False otherwise.
-                                   - str: Standard output of the command.
-                                   - str: Standard error of the command.
+            A tuple containing success status (bool), stdout (str), and stderr (str).
         """
         try:
-            result = subprocess.run(command, shell=True, text=True, capture_output=True, check=True)
-            return True, result.stdout.strip(), result.stderr.strip()
-        except subprocess.CalledProcessError as e:
-            return False, e.stdout.strip(), e.stderr.strip()
+            # Using check=False to handle non-zero exit codes gracefully without raising an exception
+            result = subprocess.run(command, shell=True, text=True, capture_output=True, timeout=120)
+            success = result.returncode == 0
+            return success, result.stdout.strip(), result.stderr.strip()
+        except subprocess.TimeoutExpired:
+            return False, "", "Command execution timed out."
         except Exception as e:
-            return False, "", str(e)
-
+            return False, "", f"Execution failed with an unexpected error: {e}"
