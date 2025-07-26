@@ -30,6 +30,9 @@ from llama_index.llms.ollama import Ollama
 from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
+# Local imports for new modules
+from toolbox import video_converter # Updated import path
+
 
 # Logging
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -376,6 +379,8 @@ def main():
                 return {"action": "retrieve_data", "content": user_input}
             if any(keyword in user_input_lower for keyword in ['status', 'how is my computer doing', 'system info', 'show system status', 'display system status', 'status kaia', 'kaia status']):
                 return {"action": "system_status", "content": user_input}
+            if any(keyword in user_input_lower for keyword in ['run ', 'execute ']) and '.sh' in user_input_lower or '.py' in user_input_lower:
+                return {"action": "run_script", "content": user_input.replace('run ', '').replace('execute ', '').strip()}
             return {"action": "chat", "content": user_input}
 
     def stream_and_print_response(response_stream, start_time):
@@ -455,7 +460,7 @@ To run a command, type 'run command <your command>' or '!<your command>'.
 
             query = input("\nYou: ").strip()
 
-            if query.lower() in ['exit', 'quit', '/exit', '/quit']: # Added /exit and /quit here
+            if query.lower() in ['exit', 'quit', '/exit', '/quit']:
                 print(f"{config.COLOR_BLUE}Kaia: Session ended. Until next time!{config.COLOR_RESET}")
                 break
             if not query:
@@ -542,6 +547,46 @@ To run a command, type 'run command <your command>' or '!<your command>'.
                         response = f"Command cancelled: {command}"
                         print(f"{config.COLOR_BLUE}{response}{config.COLOR_RESET}")
                 response_type = "command"
+
+            elif action == "run_script":
+                script_name = content
+                script_path = os.path.expanduser(os.path.join("~", script_name))
+
+                if script_name in config.SCRIPT_ALLOWLIST:
+                    if script_name in INTERACTIVE_SCRIPTS:
+                        response = (
+                            f"Error: Script '{script_name}' is interactive and cannot be run directly by Kaia. "
+                            "Please run it manually in your terminal."
+                        )
+                        print(f"{config.COLOR_RED}{response}{config.COLOR_RESET}")
+                        response_type = "script_interactive_error"
+                    elif os.path.exists(script_path) and os.path.isfile(script_path) and os.access(script_path, os.X_OK):
+                        print(f"\n{config.COLOR_BLUE}Kaia (Running Script):{config.COLOR_RESET}")
+                        print(f"{config.COLOR_YELLOW}┌── Executing Script ──┐{config.COLOR_RESET}")
+                        print(f"{config.COLOR_BLUE}{script_path}{config.COLOR_RESET}")
+                        print(f"{config.COLOR_YELLOW}└──────────────────────┘{config.COLOR_RESET}")
+                        success, stdout, stderr = cli.execute_command(script_path)
+                        if success:
+                            response = f"Script executed successfully. Output:\n{stdout}"
+                            print(f"{config.COLOR_GREEN}{response}{config.COLOR_RESET}")
+                            if stderr: print(f"{config.COLOR_YELLOW}Stderr:\n{stderr}{config.COLOR_RESET}")
+                        else:
+                            response = f"Script failed. Stderr:\n{stderr}\nStdout:\n{stdout}"
+                            print(f"{config.COLOR_RED}{response}{config.COLOR_RESET}")
+                        response_type = "script_execution"
+                    else:
+                        response = f"Error: Script '{script_name}' not found at '{script_path}', not a file, or not executable."
+                        print(f"{config.COLOR_RED}{response}{config.COLOR_RESET}")
+                        response_type = "script_error"
+                else:
+                    response = f"Error: Script '{script_name}' is not in the allowlist for direct execution."
+                    print(f"{config.COLOR_RED}{response}{config.COLOR_RESET}")
+                    response_type = "script_error"
+
+            elif action == "convert_video_to_gif": # Call the new function
+                conversion_result = video_converter.convert_video_to_gif_interactive(cli, user_id)
+                response = conversion_result['response']
+                response_type = conversion_result['response_type']
 
             elif action == "system_status":
                 status_info = cli.get_system_status()

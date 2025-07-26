@@ -20,6 +20,7 @@ GENERAL_KNOWLEDGE_DIR = os.path.join(BASE_DIR, "data")
 PERSONAL_CONTEXT_DIR = os.path.join(BASE_DIR, "personal_context")
 PERSONA_DIR = os.path.join(BASE_DIR, "data")
 PERSIST_DIR = os.path.join(BASE_DIR, "storage")
+DOWNLOADS_DIR = os.path.expanduser("~/Downloads") # Added for video conversion
 
 # ChromaDB Configuration
 CHROMA_DB_PATH = os.path.join(PERSIST_DIR, "chroma_db")
@@ -58,6 +59,8 @@ ACTION_PLAN_SYSTEM_PROMPT = """You are an AI assistant that classifies user inte
 
 Categories:
 - "command": For requests to run terminal commands (e.g., "list files", "check running processes", "change directory").
+- "run_script": For explicit requests to execute a specific script file (e.g., "run my_script.sh", "execute cleanup.py").
+- "convert_video_to_gif": For requests to convert video files (mp4, webm) to GIF (e.g., "convert video to gif", "make a gif from this mp4").
 - "knowledge_query": For questions that require information retrieval from a knowledge base (e.g., "What is...", "Explain...", "According to...", "Summarize...", "List all books...", "Can you pull text from X.pdf?").
 - "sql": For complex database queries requiring SQL joins/aggregations on `facts`, `interaction_history`, `user_preferences` tables.
 - "retrieve_data": For simple retrieval of stored personal data ("What are my preferences?", "List my facts", "What do you know about me?", "List history?").
@@ -87,6 +90,10 @@ ACTION_PLAN_EXAMPLES = [
     {"role": "assistant", "content": json.dumps({"action": "command", "content": "df -h"})},
     {"role": "user", "content": "cat /etc/hosts"},
     {"role": "assistant", "content": json.dumps({"action": "command", "content": "cat /etc/hosts"})},
+    {"role": "user", "content": "ls my home dir"},
+    {"role": "assistant", "content": json.dumps({"action": "command", "content": "ls $HOME"})},
+    {"role": "user", "content": "list contents of my home directory"},
+    {"role": "assistant", "content": json.dumps({"action": "command", "content": "ls -a $HOME"})},
     {"role": "user", "content": "What preferences have I saved?"},
     {"role": "assistant", "content": json.dumps({"action": "retrieve_data", "content": "show preferences"})},
     {"role": "user", "content": "What have I asked you before?"},
@@ -106,7 +113,15 @@ ACTION_PLAN_EXAMPLES = [
     {"role": "user", "content": "Hey there."},
     {"role": "assistant", "content": json.dumps({"action": "chat", "content": "Hey there."})},
     {"role": "user", "content": "How’s your day?"},
-    {"role": "assistant", "content": json.dumps({"action": "chat", "content": "How’s your day?"})}
+    {"role": "assistant", "content": json.dumps({"action": "chat", "content": "How’s your day?"})},
+    {"role": "user", "content": "run mp4-to-gif.sh"},
+    {"role": "assistant", "content": json.dumps({"action": "run_script", "content": "mp4-to-gif.sh"})},
+    {"role": "user", "content": "execute cleanup.py"},
+    {"role": "assistant", "content": json.dumps({"action": "run_script", "content": "cleanup.py"})},
+    {"role": "user", "content": "convert video to gif"},
+    {"role": "assistant", "content": json.dumps({"action": "convert_video_to_gif", "content": "video to gif"})},
+    {"role": "user", "content": "make a gif from this mp4"},
+    {"role": "assistant", "content": json.dumps({"action": "convert_video_to_gif", "content": "mp4 to gif"})},
 ]
 
 
@@ -221,4 +236,19 @@ DISK_MOUNTS = [
     {'path': '/run/media/ekco/KingSpec1', 'label': 'KingSpec1'},
     {'path': '/run/media/ekco/KingSpec2', 'label': 'KingSpec2'},
     {'path': '/run/media/ekco/D02B-11D2', 'label': 'Removable'}
+]
+
+# Whitelisted Scripts for Direct Execution (from user's home directory)
+SCRIPT_ALLOWLIST = [
+    "mp4-to-gif.sh",
+    "activate_kaia_env.sh",
+    "free-space.sh",
+    "music.sh",
+    "restart_speech_dispatcher.sh",
+    "backup_home.sh",
+    "bpytop.sh",
+    "epub-to-md.sh",
+    "fastfetch-lolcat.sh",
+    "find-file.sh",
+    "update-system.sh"
 ]
